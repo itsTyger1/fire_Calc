@@ -93,6 +93,7 @@ export interface ScenarioBudgetMetrics {
   fireInvesting: number;
   cashSavings: number;
   payrollPersonal: number;
+  takeHomeContributions: number;
   takeHomeIncome: number;
   incomeBasis: number;
   remaining: number;

@@ -1,12 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bar, BarChart, CartesianGrid, Cell, ComposedChart, Legend, Line, LineChart,
   Pie, PieChart, ReferenceDot, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import {
-  ArrowRight, BarChart3, Check, ChevronRight, CircleDollarSign, Copy, Download,
-  Eye, EyeOff, Flame, Gauge, Landmark, Menu, Plus, RefreshCcw, Save, Settings2,
-  ShieldCheck, SlidersHorizontal, Trash2, Upload, WalletCards, X,
+  Check, CircleDollarSign, Copy, Download, Eye, EyeOff, Flame, Gauge, Landmark,
+  Plus, RefreshCcw, Save, Settings2, Trash2, Upload, X,
 } from 'lucide-react';
 import type { AppData, ProjectionPoint, Scenario, ScenarioResult } from './types';
 import { defaultData, scenarioColors } from './defaults';
@@ -15,10 +14,9 @@ import {
   projectCore, projectScenario, scenarioBudgetMetrics,
 } from './calculations';
 import { downloadData, loadData, readImport, resetData, saveData } from './persistence';
-import { AccountsEditor, BudgetEditor, PhasesEditor, ProfileEditor } from './editors';
-import { age, Field, Metric, money, percent, Section, TextField, Toggle } from './ui';
+import { AccountsEditor, BudgetEditor, FirePhaseEditor, ProfileEditor } from './editors';
+import { age, CommittedNumberInput, Field, Metric, money, percent, Section, TextField, Toggle } from './ui';
 
-type SettingsTab = 'plan' | 'accounts' | 'phases' | 'budget' | 'emergency';
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const allocationColors = ['#37d39a', '#65a7ff', '#f4b860', '#ad7bff', '#ff718d', '#40c7d9', '#8191a1'];
 
@@ -227,30 +225,30 @@ function ScenarioContributionEditor({ open, close, data, setData, scenario }: { 
     <p className="muted">These amounts override this scenario only. They update the FIRE projection and monthly budget together.</p>
     <label className="field"><span className="field-label">Contribution phase</span><span className="select-shell"><select value={phase.id} onChange={(event) => setPhaseId(event.target.value)}>{effective.phases.map((item) => <option key={item.id} value={item.id}>{item.name}{item.id === metrics.phase.id ? ' · active now' : ''}</option>)}</select></span></label>
     <div className="scenario-contribution-head"><span>Account</span><span>Personal / month</span><span>Employer / month</span></div>
-    <div className="scenario-contribution-list">{effective.accounts.map((account) => { const amount = phase.contributions[account.id] ?? { personal: account.monthlyContribution, employer: account.employerContribution }; return <div className="scenario-contribution-row" key={account.id}><div><strong>{account.name}</strong><small>{account.type.includes('401(k)') ? 'Payroll' : account.fireEligible ? 'From deposited pay · FIRE' : 'From deposited pay'}</small></div><span className="mini-money">$<input aria-label={`${account.name} personal contribution`} type="number" min="0" value={Math.round(amount.personal * 100) / 100} onChange={(event) => update(account.id, 'personal', Number(event.target.value))} /></span><span className="mini-money">$<input aria-label={`${account.name} employer contribution`} type="number" min="0" value={Math.round(amount.employer * 100) / 100} onChange={(event) => update(account.id, 'employer', Number(event.target.value))} /></span></div>; })}</div>
+    <div className="scenario-contribution-list">{effective.accounts.map((account) => { const amount = phase.contributions[account.id] ?? { personal: account.monthlyContribution, employer: account.employerContribution }; return <div className="scenario-contribution-row" key={account.id}><div><strong>{account.name}</strong><small>{account.type.includes('401(k)') ? 'Payroll' : account.fireEligible ? 'From deposited pay · FIRE' : 'From deposited pay'}</small></div><span className="mini-money">$<CommittedNumberInput ariaLabel={`${account.name} personal contribution`} min={0} value={Math.round(amount.personal * 100) / 100} onCommit={(value) => update(account.id, 'personal', value)} /></span><span className="mini-money">$<CommittedNumberInput ariaLabel={`${account.name} employer contribution`} min={0} value={Math.round(amount.employer * 100) / 100} onCommit={(value) => update(account.id, 'employer', value)} /></span></div>; })}</div>
     <div className="contribution-totals"><div><span>Personal wealth building</span><strong>{money(phaseTotals.personal)}/mo</strong></div><div><span>Employer</span><strong>{money(phaseTotals.employer)}/mo</strong></div><div><span>Total FIRE investing</span><strong>{money(phaseTotals.fire)}/mo</strong></div><div><span>Cash savings</span><strong>{money(phaseTotals.cash)}/mo</strong></div></div>
     <div className="scenario-modal-actions"><button className="button secondary" onClick={resetPhase}><RefreshCcw size={15} /> Reset this phase</button><button className="button primary" onClick={close}>Done</button></div>
   </div></div></div>;
 }
 
-function SettingsDrawer({ open, close, tab, setTab, data, setData }: { open: boolean; close: () => void; tab: SettingsTab; setTab: (tab: SettingsTab) => void; data: AppData; setData: React.Dispatch<React.SetStateAction<AppData>> }) {
-  const tabs: Array<[SettingsTab, string, React.ReactNode]> = [['plan', 'Plan', <SlidersHorizontal size={17} />], ['accounts', 'Accounts', <WalletCards size={17} />], ['phases', 'Contributions', <ArrowRight size={17} />], ['budget', 'Budget', <BarChart3 size={17} />], ['emergency', 'Emergency', <ShieldCheck size={17} />]];
-  return <><div className={`drawer-backdrop ${open ? 'show' : ''}`} onClick={close} /><aside className={`settings-drawer ${open ? 'open' : ''}`}><header><div><span className="eyebrow">Inherited by every scenario</span><h2>Shared defaults</h2></div><button className="icon-button" onClick={close}><X /></button></header><nav>{tabs.map(([id, label, icon]) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>{icon}{label}</button>)}</nav><div className="drawer-content"><p className="shared-default-note">These values are starting defaults. Edit the selected scenario’s monthly amounts directly in its allocation table.</p>{tab === 'plan' && <ProfileEditor data={data} setData={setData} />}{tab === 'accounts' && <AccountsEditor data={data} setData={setData} />}{tab === 'phases' && <PhasesEditor data={data} setData={setData} />}{tab === 'budget' && <BudgetEditor data={data} setData={setData} />}{tab === 'emergency' && <div className="editor-stack"><p className="muted">Emergency savings are included in net worth, but excluded from the FIRE portfolio by default.</p><Field label="Emergency fund target" value={data.profile.emergencyTarget} prefix="$" min={0} onChange={(v) => setData((old) => ({ ...old, profile: { ...old.profile, emergencyTarget: v } }))} /><Field label="Normal monthly spending" value={data.profile.normalMonthlySpending} prefix="$" min={1} onChange={(v) => setData((old) => ({ ...old, profile: { ...old.profile, normalMonthlySpending: v } }))} /><Field label="Job-loss monthly spending" value={data.profile.jobLossMonthlySpending} prefix="$" min={1} onChange={(v) => setData((old) => ({ ...old, profile: { ...old.profile, jobLossMonthlySpending: v } }))} /></div>}</div></aside></>;
-}
-
 export default function App() {
   const [data, setData] = useState<AppData>(() => loadData());
   const [selected, setSelected] = useState(() => data.scenarios[0]?.id ?? '');
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<SettingsTab>('plan');
   const [toast, setToast] = useState<string | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
-  const results = useMemo(() => data.scenarios.map((scenario) => projectScenario(data, scenario)), [data]);
+  // Keep controlled inputs responsive while projection and chart updates are
+  // calculated in React's lower-priority render pass.
+  const projectionData = useDeferredValue(data);
+  const results = useMemo(
+    () => projectionData.scenarios.map((scenario) => projectScenario(projectionData, scenario)),
+    [projectionData],
+  );
   const base = results.find((result) => result.scenario.id === selected) ?? results[0];
   const selectedScenario = data.scenarios.find((scenario) => scenario.id === base?.scenario.id) ?? data.scenarios[0];
+  const projectedSelectedScenario = projectionData.scenarios.find((scenario) => scenario.id === base?.scenario.id)
+    ?? projectionData.scenarios[0];
   const fireInvestingPhaseId = data.phases.find((phase) => phase.name.toLowerCase().includes('fire'))?.id ?? data.phases[data.phases.length - 1]?.id;
-  const selectedBudget = useMemo(() => selectedScenario ? scenarioBudgetMetrics(data, selectedScenario) : null, [data, selectedScenario]);
-  const requiredBudget = useMemo(() => selectedScenario && base && Number.isFinite(base.requiredContributionScale) ? scenarioBudgetMetrics(data, selectedScenario, base.requiredContributionScale) : selectedBudget, [data, selectedScenario, base, selectedBudget]);
+  const selectedBudget = useMemo(() => selectedScenario ? scenarioBudgetMetrics(data, selectedScenario, 1, fireInvestingPhaseId) : null, [data, selectedScenario, fireInvestingPhaseId]);
   const comparisonBudgets = useMemo(() => data.scenarios.map((scenario) => ({ scenario, budget: scenarioBudgetMetrics(data, scenario, 1, fireInvestingPhaseId) })), [data, fireInvestingPhaseId]);
   const selectedPhaseId = selectedBudget?.phase.id ?? data.phases[0]?.id ?? '';
   const status = base ? monthStatus(base) : { text: 'No scenario', tone: 'negative' as const };
@@ -258,7 +256,6 @@ export default function App() {
   useEffect(() => { const timeout = window.setTimeout(() => saveData(data), 350); return () => window.clearTimeout(timeout); }, [data]);
   useEffect(() => { if (toast) { const timeout = window.setTimeout(() => setToast(null), 2600); return () => window.clearTimeout(timeout); } }, [toast]);
 
-  const openSettings = (tab: SettingsTab) => { setSettingsTab(tab); setSettingsOpen(true); };
   const handleImport = async (file?: File) => { if (!file) return; try { const next = await readImport(file); setData(next); setSelected(next.scenarios[0]?.id ?? ''); setToast('Plan imported successfully'); } catch (error) { setToast(error instanceof Error ? error.message : 'Import failed'); } };
   const handleReset = () => { if (!window.confirm('Reset the entire planner to its seeded defaults?')) return; const next = resetData(); setData(next); setSelected(next.scenarios[0].id); setToast('Planner reset'); };
   const setActiveFireGoal = (value: number) => setData((old) => ({
@@ -292,41 +289,37 @@ export default function App() {
     }),
   }));
 
-  if (!base || !selectedScenario || !selectedBudget || !requiredBudget) return <main className="fatal"><Flame /><h1>No scenarios found</h1><button className="button primary" onClick={() => setData(clone(defaultData))}>Restore defaults</button></main>;
+  if (!base || !selectedScenario || !selectedBudget) return <main className="fatal"><Flame /><h1>No scenarios found</h1><button className="button primary" onClick={() => setData(clone(defaultData))}>Restore defaults</button></main>;
   const delta = base.targetPoint.firePortfolio - base.targetPoint.fireTarget;
   const fireProgress = base.currentFirePortfolio / Math.max(1, base.fireNumber);
-  const wealthShare = requiredBudget.personalWealth / Math.max(1, requiredBudget.incomeBasis);
   const contributionDifference = base.plannedPersonalMonthly - base.requiredPersonalMonthly;
   const allocationRows = [
-    ...data.budget.map((item) => { const amount = selectedScenario.overrides.budgetAmounts?.[item.id] ?? item.amount; return { id: item.id, kind: 'budget' as const, group: item.category, name: item.name, planned: amount, required: amount }; }),
-    ...selectedBudget.rows.filter((row) => row.account.includeInNetWorth).map((row) => ({
+    ...data.budget.map((item) => { const amount = selectedScenario.overrides.budgetAmounts?.[item.id] ?? item.amount; return { id: item.id, kind: 'budget' as const, group: item.category, name: item.name, planned: amount }; }),
+    ...selectedBudget.rows.filter((row) => row.account.type === 'Roth IRA').map((row) => ({
       id: row.account.id,
       kind: 'personal' as const,
-      group: row.isPayroll ? 'Payroll investing' : row.account.type === 'HYSA / Cash' ? 'Cash savings' : 'Investing',
+      group: 'Paid from deposited take-home',
       name: row.account.name,
       planned: row.personal,
-      required: requiredBudget.rows.find((item) => item.account.id === row.account.id)?.personal ?? row.personal,
     })),
-    ...selectedBudget.rows.filter((row) => row.employer > 0).map((row) => ({ id: `${row.account.id}-employer`, accountId: row.account.id, kind: 'employer' as const, group: 'Employer · not from your budget', name: `${row.account.name} employer`, planned: row.employer, required: row.employer })),
   ];
+  const payrollRows = selectedBudget.rows.filter((row) => row.account.type.includes('401(k)'));
   const comparisonRows = [
     ...data.budget.map((item) => ({ id: item.id, kind: 'budget' as const, group: item.category, name: item.name })),
-    ...data.accounts.filter((account) => account.includeInNetWorth).map((account) => ({ id: account.id, kind: 'personal' as const, group: account.type.includes('401(k)') ? 'Before take-home · not counted' : account.type === 'HYSA / Cash' ? 'Cash savings' : 'Investing', name: account.name })),
-    { id: 'remaining', kind: 'remaining' as const, group: 'Zero-based take-home', name: 'Flexible buffer / needed cuts' },
+    ...data.accounts.filter((account) => account.type === 'Roth IRA').map((account) => ({ id: account.id, kind: 'personal' as const, group: 'Paid from deposited take-home', name: account.name })),
+    { id: 'remaining', kind: 'remaining' as const, group: 'Budget check', name: 'Unassigned take-home / overage' },
     { id: 'take-home', kind: 'income' as const, group: 'Zero-based take-home', name: 'Deposited take-home assigned' },
-    { id: 'unassigned', kind: 'unassigned' as const, group: 'Zero-based take-home', name: 'Unassigned dollars' },
   ];
   const comparisonValue = (row: typeof comparisonRows[number], scenario: Scenario, budget: typeof selectedBudget) => {
     if (row.kind === 'budget') return scenario.overrides.budgetAmounts?.[row.id] ?? data.budget.find((item) => item.id === row.id)?.amount ?? 0;
     if (row.kind === 'remaining') return budget.remaining;
     if (row.kind === 'income') return budget.takeHomeIncome;
-    if (row.kind === 'unassigned') return 0;
     const accountRow = budget.rows.find((item) => item.account.id === row.id);
     return accountRow?.personal ?? 0;
   };
 
   return <div className="app-shell">
-    <header className="topbar"><div className="brand"><span><Flame size={19} /></span><div><strong>FIRE Projector</strong><small>{data.profile.mode === 'real' ? 'Today’s dollars' : 'Future nominal dollars'}</small></div></div><div className="top-actions"><button className="button ghost" onClick={() => { saveData(data); setToast('Saved locally'); }}><Save size={16} /> <span>Save</span></button><button className="button ghost" onClick={() => downloadData(data)}><Download size={16} /> <span>Export</span></button><button className="button ghost" onClick={() => importRef.current?.click()}><Upload size={16} /> <span>Import</span></button><button className="button ghost" onClick={handleReset}><RefreshCcw size={16} /> <span>Reset</span></button><button className="button primary" onClick={() => openSettings('plan')}><Settings2 size={16} /> Shared defaults</button><input ref={importRef} type="file" accept="application/json" hidden onChange={(e) => void handleImport(e.target.files?.[0])} /></div></header>
+    <header className="topbar"><div className="brand"><span><Flame size={19} /></span><div><strong>FIRE Projector</strong><small>{data.profile.mode === 'real' ? 'Today’s dollars' : 'Future nominal dollars'}</small></div></div><div className="top-actions"><button className="button ghost" onClick={() => { saveData(data); setToast('Saved locally'); }}><Save size={16} /> <span>Save</span></button><button className="button ghost" onClick={() => downloadData(data)}><Download size={16} /> <span>Export</span></button><button className="button ghost" onClick={() => importRef.current?.click()}><Upload size={16} /> <span>Import</span></button><button className="button ghost" onClick={handleReset}><RefreshCcw size={16} /> <span>Reset</span></button><input ref={importRef} type="file" accept="application/json" hidden onChange={(e) => void handleImport(e.target.files?.[0])} /></div></header>
 
     <main className="workspace">
       <section className="hero"><div><span className="eyebrow">{data.profile.name}</span><h1>{base.firePoint && base.firePoint.age <= base.profile.retirementAge ? 'You’re on track.' : 'Your target needs a nudge.'}</h1><p>{base.firePoint ? <>At your current plan, <strong>{base.scenario.name}</strong> reaches financial independence at <strong>age {base.firePoint.age.toFixed(1)}</strong>—<span className={status.tone === 'positive' ? 'positive-text' : 'negative-text'}>{status.text}</span>.</> : <>This scenario does not reach its FIRE target by age {base.profile.maxAge}. Increase contributions, reduce spending, or revisit the timeline.</>}</p></div><div className={`hero-status ${status.tone}`}><span>{status.tone === 'positive' ? <Check size={17} /> : <Gauge size={17} />}</span><div><small>At target age {base.profile.retirementAge}</small><strong>{delta >= 0 ? '+' : ''}{money(delta, true)}</strong><em>{delta >= 0 ? 'projected surplus' : 'projected shortfall'}</em></div></div></section>
@@ -336,7 +329,7 @@ export default function App() {
         <Metric label="FIRE portfolio" value={money(base.currentFirePortfolio)} sub={`${percent(fireProgress)} of target`} tone="accent" info="Only accounts marked FIRE eligible." />
         <div className="metric fire-goal-metric">
           <span className="metric-label">FIRE goal <span className="hint" title="Edit this number to override the target for the active scenario."><CircleDollarSign size={13} /></span></span>
-          <span className="goal-input"><span>$</span><input aria-label="FIRE goal" type="number" min="1" step="10000" value={Math.round(base.fireNumber)} onChange={(event) => setActiveFireGoal(Number(event.target.value))} /></span>
+          <span className="goal-input"><span>$</span><CommittedNumberInput ariaLabel="FIRE goal" min={1} step={10000} value={Math.round(base.fireNumber)} onCommit={setActiveFireGoal} /></span>
           {base.profile.customFireNumber == null
             ? <small>{money(base.profile.annualSpending)}/yr ÷ {percent(base.profile.withdrawalRate)} · editable</small>
             : <button className="goal-reset" onClick={resetActiveFireGoal}>Custom target · reset to formula</button>}
@@ -346,7 +339,12 @@ export default function App() {
         <Metric label="Required FIRE contribution" value={Number.isFinite(base.requiredPersonalMonthly) ? `${money(base.requiredPersonalMonthly)}/mo` : 'Not reachable'} sub={!Number.isFinite(base.requiredPersonalMonthly) ? 'Goal is outside the solver range' : Math.abs(contributionDifference) < 1 ? 'Current allocation is on target' : contributionDifference > 0 ? `${money(contributionDifference)}/mo above minimum` : `${money(-contributionDifference)}/mo more needed`} tone={contributionDifference >= 0 ? 'positive' : 'negative'} info="Minimum personal FIRE contribution, preserving this scenario’s account allocation proportions across its phases." />
       </section>
 
-      <nav className="quick-nav"><button onClick={() => openSettings('plan')}><SlidersHorizontal />Shared assumptions<ChevronRight /></button><button onClick={() => openSettings('accounts')}><WalletCards />Shared accounts<ChevronRight /></button><button onClick={() => openSettings('phases')}><ArrowRight />Default phases<ChevronRight /></button><button onClick={() => openSettings('budget')}><BarChart3 />Default budget items<ChevronRight /></button></nav>
+      <div className="main-input-grid">
+        <Section title="Plan inputs" eyebrow="Edit directly on this page"><ProfileEditor data={data} setData={setData} /></Section>
+        <Section title="Income and monthly expenses" eyebrow={`${selectedScenario.name} · selected scenario cash flow`}><BudgetEditor data={data} setData={setData} scenario={selectedScenario} /></Section>
+      </div>
+      <Section title="Accounts" eyebrow="Balances, returns, and FIRE eligibility"><AccountsEditor data={data} setData={setData} /></Section>
+      <Section title="FIRE investing phase" eyebrow={`${selectedScenario.name} · manual monthly contributions`}><FirePhaseEditor data={data} setData={setData} scenario={selectedScenario} /></Section>
 
       <Section title="Scenario timelines" eyebrow="Compare every path" action={<span className="panel-note"><CircleDollarSign size={14} /> Monthly compounding</span>}>
         <ScenarioStrip data={data} setData={setData} selected={base.scenario.id} setSelected={setSelected} />
@@ -358,26 +356,25 @@ export default function App() {
       <BridgeAndEmergency result={base} data={data} setData={setData} />
 
       <div className="budget-summary">
-        <Section title="Selected scenario monthly budget" eyebrow={`${base.scenario.name} · ${selectedBudget.phase.name} · Goal ${money(base.fireNumber)} by age ${base.profile.retirementAge}`} action={<div className="budget-actions"><button className="text-button" onClick={() => openSettings('budget')}>Edit shared item list</button><button className="button secondary" onClick={resetSelectedBudget}><RefreshCcw size={14} /> Reset selected budget</button></div>}>
-          <div className={`allocation-summary ${contributionDifference >= 0 ? 'positive' : 'negative'}`}><div><strong>{contributionDifference >= 0 ? 'Your planned contributions are sufficient' : 'Your current plan needs more monthly FIRE investing'}</strong><span>{contributionDifference >= 0 ? `${money(contributionDifference)}/mo above the modeled minimum for this target.` : `Add ${money(-contributionDifference)}/mo across FIRE accounts to reach the target at the specified age.`}</span></div><b>{percent(base.requiredContributionScale, 0)}<small>of planned FIRE allocations required</small></b></div>
+        <Section title="Monthly take-home budget" eyebrow={`${base.scenario.name} · manually assigned · FIRE investing phase`} action={<button className="button secondary" onClick={resetSelectedBudget}><RefreshCcw size={14} /> Reset selected scenario inputs</button>}>
+          <div className="scale-explanation"><strong>What counts here</strong><span>Deposited take-home is the pay received in your bank account. Every expense below and your Roth IRA contribution are subtracted from it. Roth 401(k) contributions are shown separately because payroll already withheld them. Values change only when you press Enter.</span></div>
           <div className="budget-bars">{[
-            ['Needs', requiredBudget.needs, data.profile.budgetTargets.needs, '#65a7ff'], ['Wants', requiredBudget.wants, data.profile.budgetTargets.wants, '#f4b860'], ['Required wealth building', requiredBudget.personalWealth, data.profile.budgetTargets.wealth, '#37d39a'],
-          ].map(([label, value, target, color]) => { const share = Number(value) / Math.max(1, requiredBudget.incomeBasis); return <div key={String(label)}><div><span>{label}</span><b>{money(Number(value))} · {percent(share)}</b><small>Target {percent(Number(target))}</small></div><div className="bar-track"><span style={{ width: `${Math.min(100, share * 100)}%`, background: String(color) }} /><i style={{ left: `${Math.min(100, Number(target) * 100)}%` }} /></div></div>; })}</div>
-          <div className="allocation-table"><div className="allocation-row allocation-head"><span>Monthly item</span><span>Scenario amount</span><span>Required</span><span>Difference</span></div>{allocationRows.map((row) => { const change = row.required - row.planned; const accountId = 'accountId' in row ? row.accountId : row.id; return <div className="allocation-row" key={`${row.group}-${row.id}`}><span><small>{row.group}</small><strong>{row.name}</strong></span><span className="inline-budget-input"><i>$</i><input aria-label={`${row.name} scenario amount`} type="number" min="0" value={Math.round(row.planned * 100) / 100} onChange={(event) => row.kind === 'budget' ? updateSelectedBudgetItem(row.id, Number(event.target.value)) : updateSelectedContribution(accountId, row.kind, Number(event.target.value))} /></span><span>{money(row.required)}</span><span className={change > .5 ? 'negative-text' : change < -.5 ? 'positive-text' : ''}>{Math.abs(change) < .5 ? '—' : `${change > 0 ? '+' : '−'}${money(Math.abs(change))}`}</span></div>; })}<div className="allocation-row zero-sum-adjustment"><span><small>Zero-based take-home</small><strong>Flexible buffer / needed cuts</strong></span><span className={selectedBudget.remaining < 0 ? 'negative-text' : ''}>{money(selectedBudget.remaining)}</span><span className={requiredBudget.remaining < 0 ? 'negative-text' : ''}>{money(requiredBudget.remaining)}</span><span>{Math.abs(requiredBudget.remaining - selectedBudget.remaining) < .5 ? '—' : money(requiredBudget.remaining - selectedBudget.remaining)}</span></div><div className="allocation-row zero-sum-total"><span><small>Zero-based check</small><strong>Unassigned dollars</strong></span><span>$0</span><span>$0</span><span>—</span></div></div>
-          <div className="cashflow-math"><div><span>Stated take-home</span><strong>{money(requiredBudget.takeHomeIncome)}</strong><small>Payroll retirement stays outside this amount</small></div><i>−</i><div><span>Needs + wants</span><strong>{money(requiredBudget.needs + requiredBudget.wants)}</strong><small>Normal monthly budget</small></div><i>−</i><div><span>From deposited pay</span><strong>{money(requiredBudget.personalWealth - requiredBudget.payrollPersonal)}</strong><small>Required investing and cash savings</small></div><i>=</i><div className={requiredBudget.remaining >= 0 ? 'cashflow-positive' : 'cashflow-negative'}><span>{requiredBudget.remaining >= 0 ? 'Flexible spending buffer' : 'Cuts or income needed'}</span><strong>{money(Math.abs(requiredBudget.remaining))}</strong><small>{requiredBudget.remaining >= 0 ? 'Assigned as the zero-sum balancing line' : 'Reduce another line or increase take-home'}</small></div></div>
-          <div className="budget-detail-strip"><span><b>{money(requiredBudget.fireInvesting)}</b> required FIRE investing</span><span><b>{money(requiredBudget.cashSavings)}</b> cash savings</span><span><b>{money(requiredBudget.employerWealth)}</b> employer contribution</span><span><b>{money(selectedBudget.personalWealth)}</b> currently planned wealth building</span></div>
-          <p className="fine-print">Required amounts are solved against this scenario’s goal and target age, preserving its FIRE-account contribution proportions across phases. Deposited take-home is fully assigned across expenses, non-payroll wealth building, and the zero-sum adjustment. Payroll and employer contributions stay outside take-home to prevent double-counting. Required wealth-building share: {percent(wealthShare)}.</p>
-          <div className="budget-comparison"><div className="comparison-title"><div><span className="eyebrow">FIRE-investing phase · zero-based</span><h3>Monthly line-item comparison</h3></div><small>{comparisonBudgets[0]?.budget.phase.name ?? 'FIRE investing'} · every take-home dollar is assigned; payroll is shown separately.</small></div><div className="comparison-scroll"><div className="comparison-grid" style={{ '--scenario-count': data.scenarios.length } as React.CSSProperties}><div className="comparison-corner">Monthly item</div>{comparisonBudgets.map(({ scenario }) => <button key={scenario.id} className={`comparison-scenario ${scenario.id === base.scenario.id ? 'active' : ''}`} onClick={() => setSelected(scenario.id)}><i style={{ background: scenario.color }} /><span>{scenario.name}</span></button>)}{comparisonRows.flatMap((row) => {
+            ['Needs', selectedBudget.needs, data.profile.budgetTargets.needs, '#65a7ff'], ['Wants', selectedBudget.wants, data.profile.budgetTargets.wants, '#f4b860'], ['Roth IRA', selectedBudget.takeHomeContributions, data.profile.budgetTargets.wealth, '#37d39a'],
+          ].map(([label, value, target, color]) => { const share = Number(value) / Math.max(1, selectedBudget.takeHomeIncome); return <div key={String(label)}><div><span>{label}</span><b>{money(Number(value))} · {percent(share)}</b><small>{percent(Number(target))} reference marker</small></div><div className="bar-track"><span style={{ width: `${Math.min(100, share * 100)}%`, background: String(color) }} /><i style={{ left: `${Math.min(100, Number(target) * 100)}%` }} /></div></div>; })}</div>
+          <div className="allocation-table"><div className="allocation-row allocation-head"><span>Take-home-funded item</span><span>Monthly amount</span><span /><span /></div>{allocationRows.map((row) => <div className="allocation-row" key={`${row.group}-${row.id}`}><span><small>{row.group}</small><strong>{row.name}</strong></span><span className="inline-budget-input"><i>$</i><CommittedNumberInput ariaLabel={`${row.name} scenario amount`} min={0} value={Math.round(row.planned * 100) / 100} onCommit={(value) => row.kind === 'budget' ? updateSelectedBudgetItem(row.id, value) : updateSelectedContribution(row.id, row.kind, value)} /></span><span /><span /></div>)}<div className="allocation-row zero-sum-adjustment"><span><small>Budget check</small><strong>{selectedBudget.remaining >= 0 ? 'Unassigned take-home' : 'Budget exceeds take-home'}</strong></span><span className={selectedBudget.remaining === 0 ? 'positive-text' : selectedBudget.remaining < 0 ? 'negative-text' : 'unassigned-text'}>{money(Math.abs(selectedBudget.remaining))}</span><span /><span /></div><div className="allocation-row zero-sum-total"><span><small>Reconciliation</small><strong>Deposited take-home accounted for</strong></span><span>{money(selectedBudget.needs + selectedBudget.wants + selectedBudget.takeHomeContributions + selectedBudget.remaining)}</span><span>Must equal</span><span>{money(selectedBudget.takeHomeIncome)}</span></div></div>
+          <div className="cashflow-math"><div><span>Deposited take-home</span><strong>{money(selectedBudget.takeHomeIncome)}</strong><small>Received in your bank account</small></div><i>−</i><div><span>All expenses</span><strong>{money(selectedBudget.needs + selectedBudget.wants)}</strong><small>Every entered budget item</small></div><i>−</i><div><span>Roth IRA</span><strong>{money(selectedBudget.takeHomeContributions)}</strong><small>Paid from deposited take-home</small></div><i>=</i><div className={selectedBudget.remaining === 0 ? 'cashflow-positive' : 'cashflow-negative'}><span>{selectedBudget.remaining >= 0 ? 'Unassigned take-home' : 'Budget exceeds take-home'}</span><strong>{money(Math.abs(selectedBudget.remaining))}</strong><small>{selectedBudget.remaining > 0 ? 'Assign this amount manually to reach $0' : selectedBudget.remaining < 0 ? 'Your assignments exceed deposited take-home' : 'Every take-home dollar is assigned'}</small></div></div>
+          <div className="budget-detail-strip">{payrollRows.map((row) => <span key={row.account.id}><b>{money(row.personal)}</b> {row.account.name} · payroll withholding, not subtracted</span>)}<span><b>{money(selectedBudget.employerWealth)}</b> employer contributions · not subtracted</span></div>
+          <p className="fine-print">Formula: deposited take-home − all expense line items − Roth IRA = unassigned take-home. Roth 401(k), employer contributions, taxable brokerage, cash savings, and other FIRE accounts do not alter this budget remainder. Their manually entered values still feed the FIRE projection.</p>
+          <div className="budget-comparison"><div className="comparison-title"><div><span className="eyebrow">FIRE-investing phase · zero-based</span><h3>Monthly line-item comparison</h3></div><small>{comparisonBudgets[0]?.budget.phase.name ?? 'FIRE investing'} · payroll retirement and employer contributions are excluded from this take-home comparison.</small></div><div className="comparison-scroll"><div className="comparison-grid" style={{ '--scenario-count': data.scenarios.length } as React.CSSProperties}><div className="comparison-corner">Take-home-funded item</div>{comparisonBudgets.map(({ scenario }) => <button key={scenario.id} className={`comparison-scenario ${scenario.id === base.scenario.id ? 'active' : ''}`} onClick={() => setSelected(scenario.id)}><i style={{ background: scenario.color }} /><span>{scenario.name}</span></button>)}{comparisonRows.flatMap((row) => {
             const baseline = comparisonBudgets[0] ? comparisonValue(row, comparisonBudgets[0].scenario, comparisonBudgets[0].budget) : 0;
-            return [<div className={`comparison-label ${['remaining', 'income', 'unassigned'].includes(row.kind) ? 'summary' : ''}`} key={`label-${row.kind}-${row.id}`}><small>{row.group}</small><strong>{row.name}</strong></div>, ...comparisonBudgets.map(({ scenario, budget }) => { const value = comparisonValue(row, scenario, budget); const difference = value - baseline; return <button key={`${row.kind}-${row.id}-${scenario.id}`} className={`comparison-value ${scenario.id === base.scenario.id ? 'active' : ''} ${row.kind === 'remaining' && value < 0 ? 'negative-text' : ''}`} onClick={() => setSelected(scenario.id)}><strong>{money(value)}</strong><small>{scenario === comparisonBudgets[0]?.scenario || Math.abs(difference) < .5 ? '—' : `${difference > 0 ? '+' : '−'}${money(Math.abs(difference))} vs base`}</small></button>; })];
+            return [<div className={`comparison-label ${['remaining', 'income'].includes(row.kind) ? 'summary' : ''}`} key={`label-${row.kind}-${row.id}`}><small>{row.group}</small><strong>{row.name}</strong></div>, ...comparisonBudgets.map(({ scenario, budget }) => { const value = comparisonValue(row, scenario, budget); const difference = value - baseline; return <button key={`${row.kind}-${row.id}-${scenario.id}`} className={`comparison-value ${scenario.id === base.scenario.id ? 'active' : ''} ${row.kind === 'remaining' && value !== 0 ? 'negative-text' : ''}`} onClick={() => setSelected(scenario.id)}><strong>{money(value)}</strong><small>{scenario === comparisonBudgets[0]?.scenario || Math.abs(difference) < .5 ? '—' : `${difference > 0 ? '+' : '−'}${money(Math.abs(difference))} vs base`}</small></button>; })];
           })}</div></div></div>
         </Section>
       </div>
 
-      <Sensitivity data={data} selectedScenario={selectedScenario} />
-      <footer><div><Landmark size={18} /><strong>Private by design</strong><span>Your plan is saved in this browser. No login or backend.</span></div><p>This tool is for planning and educational purposes. Investment returns, inflation, tax laws, withdrawal rules, and future expenses are uncertain. Projections are estimates, not guarantees or individualized tax/legal advice.</p></footer>
+      {projectedSelectedScenario && <Sensitivity data={projectionData} selectedScenario={projectedSelectedScenario} />}
+      <footer><div><Landmark size={18} /><strong>Private by design</strong><span>Your plan is saved on this computer. No login or backend.</span></div><p>This tool is for planning and educational purposes. Investment returns, inflation, tax laws, withdrawal rules, and future expenses are uncertain. Projections are estimates, not guarantees or individualized tax/legal advice.</p></footer>
     </main>
-    <SettingsDrawer open={settingsOpen} close={() => setSettingsOpen(false)} tab={settingsTab} setTab={setSettingsTab} data={data} setData={setData} />
     {toast && <div className="toast"><Check size={16} />{toast}</div>}
   </div>;
 }

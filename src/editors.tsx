@@ -1,7 +1,7 @@
 import { useState, type Dispatch, type SetStateAction } from 'react';
 import { ArrowDown, ArrowUp, Plus, Trash2, X } from 'lucide-react';
-import type { Account, AccountType, AppData, AssetClass, ContributionPhase, TaxTreatment, Accessibility } from './types';
-import { Field, SelectField, TextField, Toggle, money } from './ui';
+import type { Account, AccountType, AppData, AssetClass, ContributionPhase, Scenario, TaxTreatment, Accessibility } from './types';
+import { CommittedNumberInput, Field, SelectField, TextField, Toggle, money } from './ui';
 
 type Setter = Dispatch<SetStateAction<AppData>>;
 const accountTypes: AccountType[] = ['Roth 401(k)', 'Traditional 401(k)', 'Roth IRA', 'Traditional IRA', 'Taxable Brokerage', 'HYSA / Cash', 'Treasury / Bonds', 'Crypto', 'HSA', 'Other'];
@@ -17,7 +17,7 @@ export function ProfileEditor({ data, setData }: { data: AppData; setData: Sette
       <Field label="Target retirement age" value={p.retirementAge} min={p.currentAge + .1} step={0.1} onChange={(v) => update('retirementAge', v)} error={p.retirementAge <= p.currentAge ? 'Must be after your current age.' : undefined} />
       <Field label="Maximum projection age" value={p.maxAge} min={p.retirementAge + .1} step={1} onChange={(v) => update('maxAge', v)} error={p.maxAge <= p.retirementAge ? 'Must be after retirement age.' : undefined} />
       <Field label="Annual retirement spending" value={p.annualSpending} min={0} step={500} prefix="$" onChange={(v) => update('annualSpending', Math.max(0, v))} />
-      <Field label="Safe withdrawal rate" value={p.withdrawalRate * 100} min={0.1} max={99.9} step={0.05} suffix="%" onChange={(v) => update('withdrawalRate', v / 100)} hint="FIRE number = annual spending ÷ withdrawal rate." />
+      <Field label="Safe withdrawal rate" value={Math.round(p.withdrawalRate * 10000) / 100} min={0.1} max={99.9} step={0.05} suffix="%" onChange={(v) => update('withdrawalRate', v / 100)} hint="FIRE number = annual spending ÷ withdrawal rate." />
     </div>
     <div className="goal-override">
       <div><span className="eyebrow">FIRE goal source</span><strong>{p.customFireNumber == null ? 'Spending-based calculation' : 'Custom target'}</strong></div>
@@ -67,7 +67,7 @@ export function AccountsEditor({ data, setData }: { data: AppData; setData: Sett
         <div className="holdings-head"><strong>Optional holdings</strong><button className="text-button" onClick={() => updateAccount(account.id, { holdings: [...account.holdings, { id: crypto.randomUUID(), symbol: 'New holding', value: 0, assetClass: 'Other' }] })}><Plus size={14} /> Add holding</button></div>
         {account.holdings.map((holding) => <div className="holding-row" key={holding.id}>
           <input aria-label="Holding symbol" value={holding.symbol} onChange={(e) => updateAccount(account.id, { holdings: account.holdings.map((h) => h.id === holding.id ? { ...h, symbol: e.target.value } : h) })} />
-          <input aria-label="Holding value" type="number" min="0" value={holding.value} onChange={(e) => updateAccount(account.id, { holdings: account.holdings.map((h) => h.id === holding.id ? { ...h, value: Math.max(0, Number(e.target.value)) } : h) })} />
+          <CommittedNumberInput ariaLabel="Holding value" min={0} value={holding.value} onCommit={(value) => updateAccount(account.id, { holdings: account.holdings.map((h) => h.id === holding.id ? { ...h, value } : h) })} />
           <select aria-label="Asset class" value={holding.assetClass} onChange={(e) => updateAccount(account.id, { holdings: account.holdings.map((h) => h.id === holding.id ? { ...h, assetClass: e.target.value as AssetClass } : h) })}>{assetClasses.map((v) => <option key={v}>{v}</option>)}</select>
           <button className="icon-button danger" aria-label="Remove holding" onClick={() => updateAccount(account.id, { holdings: account.holdings.filter((h) => h.id !== holding.id) })}><X size={15} /></button>
         </div>)}
@@ -91,19 +91,73 @@ export function PhasesEditor({ data, setData }: { data: AppData; setData: Setter
         {phase.startsWhen.kind === 'age' && <Field label="Start age" value={phase.startsWhen.age} min={data.profile.currentAge} step={0.1} onChange={(v) => updatePhase(phase.id, (p) => ({ ...p, startsWhen: { kind: 'age', age: v } }))} />}
         {phase.startsWhen.kind === 'date' && <label className="field"><span className="field-label">Start date</span><input className="text-input" type="date" value={phase.startsWhen.date} onChange={(e) => updatePhase(phase.id, (p) => ({ ...p, startsWhen: { kind: 'date', date: e.target.value } }))} /></label>}
       </div>
-      <div className="phase-contributions"><span className="phase-col-head">Account</span><span className="phase-col-head">Personal / mo</span><span className="phase-col-head">Employer / mo</span>{data.accounts.map((account) => { const amount = phase.contributions[account.id] ?? { personal: 0, employer: 0 }; return <div className="phase-row" key={account.id}><strong>{account.name}</strong><span className="mini-money">$<input type="number" min="0" value={amount.personal} onChange={(e) => updatePhase(phase.id, (p) => ({ ...p, contributions: { ...p.contributions, [account.id]: { ...amount, personal: Math.max(0, Number(e.target.value)) } } }))} /></span><span className="mini-money">$<input type="number" min="0" value={amount.employer} onChange={(e) => updatePhase(phase.id, (p) => ({ ...p, contributions: { ...p.contributions, [account.id]: { ...amount, employer: Math.max(0, Number(e.target.value)) } } }))} /></span></div>; })}</div>
+      <div className="phase-contributions"><span className="phase-col-head">Account</span><span className="phase-col-head">Personal / mo</span><span className="phase-col-head">Employer / mo</span>{data.accounts.map((account) => { const amount = phase.contributions[account.id] ?? { personal: 0, employer: 0 }; return <div className="phase-row" key={account.id}><strong>{account.name}</strong><span className="mini-money">$<CommittedNumberInput min={0} value={amount.personal} onCommit={(value) => updatePhase(phase.id, (p) => ({ ...p, contributions: { ...p.contributions, [account.id]: { ...amount, personal: value } } }))} /></span><span className="mini-money">$<CommittedNumberInput min={0} value={amount.employer} onCommit={(value) => updatePhase(phase.id, (p) => ({ ...p, contributions: { ...p.contributions, [account.id]: { ...amount, employer: value } } }))} /></span></div>; })}</div>
     </div>)}
     <button className="add-card" onClick={add}><Plus size={18} /> Add contribution phase</button>
   </div>;
 }
 
-export function BudgetEditor({ data, setData }: { data: AppData; setData: Setter }) {
+export function FirePhaseEditor({ data, setData, scenario }: { data: AppData; setData: Setter; scenario: Scenario }) {
+  const phase = data.phases.find((item) => item.name.toLowerCase().includes('fire'))
+    ?? data.phases[data.phases.length - 1];
+
+  if (!phase) return <p className="muted">Add a contribution phase before editing FIRE contributions.</p>;
+
+  const updateContribution = (accountId: string, key: 'personal' | 'employer', value: number) => {
+    setData((old) => ({ ...old, scenarios: old.scenarios.map((item) => item.id === scenario.id ? {
+      ...item,
+      overrides: { ...item.overrides, phaseContributions: {
+        ...item.overrides.phaseContributions,
+        [phase.id]: {
+          ...item.overrides.phaseContributions?.[phase.id],
+          [accountId]: {
+            ...item.overrides.phaseContributions?.[phase.id]?.[accountId],
+            [key]: Math.max(0, value),
+          },
+        },
+      } },
+    } : item) }));
+  };
+
+  return <div className="editor-stack inline-fire-phase">
+    <p className="muted">These are your manually entered monthly amounts for <strong>{scenario.name}</strong>. Roth IRA is subtracted from deposited take-home; Roth 401(k) is tracked but not subtracted because payroll already withheld it. Press Enter to apply a change.</p>
+    <div className="phase-contributions">
+      <span className="phase-col-head">Account</span><span className="phase-col-head">Personal / mo</span><span className="phase-col-head">Employer / mo</span>
+      {data.accounts.map((account) => {
+        const baseAmount = phase.contributions[account.id] ?? { personal: account.monthlyContribution, employer: account.employerContribution };
+        const override = scenario.overrides.phaseContributions?.[phase.id]?.[account.id];
+        const amount = { personal: override?.personal ?? baseAmount.personal, employer: override?.employer ?? baseAmount.employer };
+        return <div className="phase-row" key={account.id}><strong>{account.name}</strong><span className="mini-money">$<CommittedNumberInput ariaLabel={`${account.name} FIRE-phase personal contribution`} min={0} value={amount.personal} onCommit={(value) => updateContribution(account.id, 'personal', value)} /></span><span className="mini-money">$<CommittedNumberInput ariaLabel={`${account.name} FIRE-phase employer contribution`} min={0} value={amount.employer} onCommit={(value) => updateContribution(account.id, 'employer', value)} /></span></div>;
+      })}
+    </div>
+  </div>;
+}
+
+export function BudgetEditor({ data, setData, scenario }: { data: AppData; setData: Setter; scenario: Scenario }) {
   const p = data.profile;
   const updateProfile = <K extends keyof typeof p>(key: K, value: typeof p[K]) => setData((old) => ({ ...old, profile: { ...old.profile, [key]: value } }));
+  const updateScenarioAmount = (itemId: string, amount: number) => setData((old) => ({
+    ...old,
+    scenarios: old.scenarios.map((item) => item.id === scenario.id ? {
+      ...item,
+      overrides: { ...item.overrides, budgetAmounts: { ...item.overrides.budgetAmounts, [itemId]: amount } },
+    } : item),
+  }));
+  const removeBudgetItem = (itemId: string) => setData((old) => ({
+    ...old,
+    budget: old.budget.filter((item) => item.id !== itemId),
+    scenarios: old.scenarios.map((item) => {
+      const budgetAmounts = { ...(item.overrides.budgetAmounts ?? {}) };
+      delete budgetAmounts[itemId];
+      return { ...item, overrides: { ...item.overrides, budgetAmounts } };
+    }),
+  }));
   return <div className="editor-stack">
-    <div className="editor-grid"><Field label="Gross monthly income" value={p.grossMonthlyIncome} prefix="$" min={0} onChange={(v) => updateProfile('grossMonthlyIncome', v)} /><Field label="Deposited take-home" value={p.netMonthlyIncome} prefix="$" min={0} onChange={(v) => updateProfile('netMonthlyIncome', v)} /><Field label="Payroll retirement" value={p.payrollRetirement} prefix="$" min={0} onChange={(v) => updateProfile('payrollRetirement', v)} hint="Tracked outside deposited take-home to prevent double-counting." /></div>
+    <div className="editor-grid"><Field label="Gross monthly income" value={p.grossMonthlyIncome} prefix="$" min={0} onChange={(v) => updateProfile('grossMonthlyIncome', v)} /><Field label="Deposited take-home" value={p.netMonthlyIncome} prefix="$" min={0} onChange={(v) => updateProfile('netMonthlyIncome', v)} hint="The amount that actually reaches your bank account after payroll deductions." /></div>
+    <p className="shared-default-note">Enter your own 401(k) payroll deduction in the FIRE-investing phase below. It is already withheld before deposited take-home, so the remaining-money calculation does not subtract it a second time. Employer contributions are also excluded from take-home spending.</p>
     <div className="ratio-target"><span>Custom budget target</span>{(['needs', 'wants', 'wealth'] as const).map((key) => <Field key={key} label={key[0].toUpperCase() + key.slice(1)} value={p.budgetTargets[key] * 100} suffix="%" min={0} max={100} onChange={(v) => updateProfile('budgetTargets', { ...p.budgetTargets, [key]: v / 100 })} />)}</div>
-    <div className="budget-items">{data.budget.map((item) => <div className="budget-row" key={item.id}><input value={item.name} onChange={(e) => setData((old) => ({ ...old, budget: old.budget.map((b) => b.id === item.id ? { ...b, name: e.target.value } : b) }))} /><select value={item.category} onChange={(e) => setData((old) => ({ ...old, budget: old.budget.map((b) => b.id === item.id ? { ...b, category: e.target.value as 'Needs' | 'Wants' } : b) }))}><option>Needs</option><option>Wants</option></select><span className="mini-money">$<input type="number" min="0" value={item.amount} onChange={(e) => setData((old) => ({ ...old, budget: old.budget.map((b) => b.id === item.id ? { ...b, amount: Math.max(0, Number(e.target.value)) } : b) }))} /></span><button className="icon-button danger" onClick={() => setData((old) => ({ ...old, budget: old.budget.filter((b) => b.id !== item.id) }))}><Trash2 size={15} /></button></div>)}</div>
+    <p className="scenario-budget-note">Monthly expense amounts below belong to <strong>{scenario.name}</strong>. Each expense is subtracted from deposited take-home after you press Enter.</p>
+    <div className="budget-items">{data.budget.map((item) => { const amount = scenario.overrides.budgetAmounts?.[item.id] ?? item.amount; return <div className="budget-row" key={item.id}><input value={item.name} onChange={(e) => setData((old) => ({ ...old, budget: old.budget.map((b) => b.id === item.id ? { ...b, name: e.target.value } : b) }))} /><select value={item.category} onChange={(e) => setData((old) => ({ ...old, budget: old.budget.map((b) => b.id === item.id ? { ...b, category: e.target.value as 'Needs' | 'Wants' } : b) }))}><option>Needs</option><option>Wants</option></select><span className="mini-money">$<CommittedNumberInput min={0} value={amount} onCommit={(value) => updateScenarioAmount(item.id, value)} /></span><button className="icon-button danger" onClick={() => removeBudgetItem(item.id)}><Trash2 size={15} /></button></div>; })}</div>
     <button className="add-card" onClick={() => setData((old) => ({ ...old, budget: [...old.budget, { id: crypto.randomUUID(), name: 'New expense', category: 'Needs', amount: 0 }] }))}><Plus size={18} /> Add budget item</button>
   </div>;
 }

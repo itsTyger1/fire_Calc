@@ -1,15 +1,27 @@
-# FIRE Projector
+# FIRE Projector Desktop
 
-A local-first FIRE planning and scenario comparison app built with React, TypeScript, Vite, and Recharts.
+A private, local-first Windows desktop app for FIRE planning and scenario comparison, built with Electron, React, TypeScript, Vite, and Recharts.
+
+## Install on Windows
+
+Run `npm install`, followed by:
+
+```bash
+npm run build:desktop
+```
+
+The Windows installer is written to `release/FIRE-Projector-Setup-1.0.2.exe`. The installer creates desktop and Start menu shortcuts. All calculations run locally and plan data stays in the app's local profile unless you explicitly export it.
+
+For a standalone executable instead of an installer, run `npm run build:portable`.
 
 ## Run locally
 
 ```bash
 npm install
-npm run dev
+npm run dev:desktop
 ```
 
-Open the URL printed by Vite (normally `http://localhost:5173`).
+This starts the Vite development server and opens it in the desktop shell.
 
 ## Verify and build
 
@@ -18,7 +30,7 @@ npm test
 npm run build
 ```
 
-The production bundle is written to `dist/`. Plan data is autosaved in browser LocalStorage; use the app’s Export and Import controls to move a plan between browsers.
+The production UI bundle is written to `dist/`. Plan data is autosaved locally; use the app’s Export and Import controls for backups or moving a plan between computers.
 
 ## Projection conventions
 

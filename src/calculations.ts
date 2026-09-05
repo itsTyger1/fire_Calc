@@ -130,6 +130,9 @@ export const projectCore = ({ profile, accounts, phases, extraMonthlyContributio
   const maxAge = endAtTarget ? profile.retirementAge : profile.maxAge;
   const totalMonths = Math.max(0, Math.ceil((maxAge - profile.currentAge) * 12));
   const balances = Object.fromEntries(accounts.map((account) => [account.id, Math.max(0, account.balance)]));
+  const monthlyRates = Object.fromEntries(
+    accounts.map((account) => [account.id, annualToMonthlyRate(annualReturnFor(account, profile))]),
+  );
   const start = new Date();
   const baseFireNumber = effectiveFireNumber(profile);
   const startingTotals = totalsFor(accounts, balances, profile.rothContributionBasis);
@@ -163,7 +166,7 @@ export const projectCore = ({ profile, accounts, phases, extraMonthlyContributio
       const scaledPersonal = isScalableFireAccount(account) ? planned.personal * Math.max(0, fireContributionScale) : planned.personal;
       const personal = Math.max(0, scaledPersonal + extra);
       const employer = Math.max(0, planned.employer);
-      balances[account.id] = growAccountOneMonth(balances[account.id], personal + employer, annualReturnFor(account, profile));
+      balances[account.id] = (Math.max(0, balances[account.id]) + personal + employer) * (1 + monthlyRates[account.id]);
       if (account.fireEligible) {
         personalContributions += personal;
         employerContributions += employer;
@@ -188,7 +191,7 @@ export const solveRequiredAdditionalContribution = (
   if (!reaches(maxMonthly)) return Infinity;
   let low = 0;
   let high = maxMonthly;
-  for (let i = 0; i < 60; i += 1) {
+  for (let i = 0; i < 32; i += 1) {
     const mid = (low + high) / 2;
     if (reaches(mid)) high = mid; else low = mid;
   }
@@ -209,7 +212,8 @@ export const solveRequiredContributionScale = (
   high = Math.min(high, maxScale);
   if (!reaches(high)) return Infinity;
   let low = 0;
-  for (let i = 0; i < 60; i += 1) {
+  // 32 bisections are already far more precise than a cent at this range.
+  for (let i = 0; i < 32; i += 1) {
     const mid = (low + high) / 2;
     if (reaches(mid)) high = mid; else low = mid;
   }
@@ -224,21 +228,22 @@ export const projectScenario = (data: AppData, scenario: Scenario): ScenarioResu
   const targetPoint = points[targetMonth];
   const current = points[0];
   const activePhase = resolvePhase(phases, current.balances, profile.currentAge, current.date);
+  const planningPhase = phases.find((phase) => phase.name.toLowerCase().includes('fire')) ?? activePhase;
   let plannedPersonalMonthly = 0;
   let plannedEmployerMonthly = 0;
   accounts.forEach((account) => {
     if (!account.fireEligible) return;
-    const amount = activePhase?.contributions[account.id] ?? { personal: account.monthlyContribution, employer: account.employerContribution };
+    const amount = planningPhase?.contributions[account.id] ?? { personal: account.monthlyContribution, employer: account.employerContribution };
     plannedPersonalMonthly += amount.personal;
     plannedEmployerMonthly += amount.employer;
   });
   const requiredContributionScale = solveRequiredContributionScale(profile, accounts, phases);
-  const activeRequiredPersonal = accounts.reduce((sum, account) => {
+  const requiredPlanningPersonal = accounts.reduce((sum, account) => {
     if (!account.fireEligible) return sum;
-    const amount = activePhase?.contributions[account.id] ?? { personal: account.monthlyContribution, employer: account.employerContribution };
+    const amount = planningPhase?.contributions[account.id] ?? { personal: account.monthlyContribution, employer: account.employerContribution };
     return sum + (isScalableFireAccount(account) ? amount.personal * requiredContributionScale : amount.personal);
   }, 0);
-  const requiredPersonalMonthly = Number.isFinite(requiredContributionScale) ? activeRequiredPersonal : Infinity;
+  const requiredPersonalMonthly = Number.isFinite(requiredContributionScale) ? requiredPlanningPersonal : Infinity;
   return {
     scenario, profile, accounts, points, fireNumber: effectiveFireNumber(profile), firePoint, targetPoint,
     currentFirePortfolio: current.firePortfolio, currentNetWorth: current.netWorth, currentAccessible: current.accessible,
@@ -287,9 +292,14 @@ export const scenarioBudgetMetrics = (data: AppData, scenario: Scenario, fireCon
   // shown separately and never deducted from it a second time.
   const takeHomeIncome = data.profile.netMonthlyIncome;
   const incomeBasis = takeHomeIncome + payrollPersonal;
-  const takeHomeContributions = personalWealth - payrollPersonal;
+  // The monthly bank-account budget contains the user's expense lines plus Roth
+  // IRA contributions. Other investment/cash accounts belong to the FIRE
+  // projection, while 401(k) contributions are already withheld from payroll.
+  const takeHomeContributions = rows
+    .filter((row) => row.account.type === 'Roth IRA')
+    .reduce((sum, row) => sum + row.personal, 0);
   const remaining = takeHomeIncome - needs - wants - takeHomeContributions;
-  return { phase, rows, needs, wants, personalWealth, employerWealth, fireInvesting, cashSavings, payrollPersonal, takeHomeIncome, incomeBasis, remaining };
+  return { phase, rows, needs, wants, personalWealth, employerWealth, fireInvesting, cashSavings, payrollPersonal, takeHomeContributions, takeHomeIncome, incomeBasis, remaining };
 };
 
 export const allocationByClass = (accounts: Account[]) => {

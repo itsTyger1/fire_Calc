@@ -61,6 +61,7 @@ describe('financial calculations', () => {
   it('tracks employer contributions separately', () => {
     const result = projectScenario(defaultData, defaultData.scenarios[0]);
     expect(result.plannedEmployerMonthly).toBe(733);
+    expect(result.plannedPersonalMonthly).toBe(2275);
     expect(result.points[1].employerContributions).toBe(733);
   });
   it('computes emergency fund runway and target timing', () => {
@@ -82,7 +83,7 @@ describe('financial calculations', () => {
     expect(budget.rows.find((row) => row.account.id === 'taxable')?.personal).toBe(500);
     expect(budget.payrollPersonal).toBe(600);
     expect(budget.takeHomeIncome).toBe(defaultData.profile.netMonthlyIncome);
-    expect(budget.remaining).toBe(defaultData.profile.netMonthlyIncome - budget.needs - budget.wants - (budget.personalWealth - budget.payrollPersonal));
+    expect(budget.remaining).toBe(defaultData.profile.netMonthlyIncome - budget.needs - budget.wants - budget.takeHomeContributions);
     expect(projected.points[1].personalContributions).toBe(1725);
   });
   it('calculates a required account budget that reaches the goal at the target age', () => {
@@ -119,12 +120,39 @@ describe('financial calculations', () => {
     expect(metrics.phase.id).toBe('phase-fire');
     expect(metrics.rows.find((row) => row.account.id === 'taxable')?.personal).toBe(850);
     expect(metrics.cashSavings).toBe(250);
+    expect(metrics.remaining).toBe(1622);
   });
   it('accounts for every take-home dollar in every FIRE-phase scenario', () => {
     defaultData.scenarios.forEach((scenario) => {
       const metrics = scenarioBudgetMetrics(defaultData, scenario, 1, 'phase-fire');
-      const fromTakeHome = metrics.personalWealth - metrics.payrollPersonal;
+      const fromTakeHome = metrics.takeHomeContributions;
       expect(metrics.needs + metrics.wants + fromTakeHome + metrics.remaining).toBeCloseTo(metrics.takeHomeIncome);
     });
+  });
+  it('subtracts expenses and Roth IRA only from deposited take-home', () => {
+    const exampleData = {
+      ...defaultData,
+      profile: { ...defaultData.profile, netMonthlyIncome: 5000 },
+      budget: [{ id: 'expenses', name: 'All expenses', category: 'Needs' as const, amount: 3500 }],
+    };
+    const scenario = {
+      ...exampleData.scenarios[0],
+      overrides: {
+        phaseContributions: {
+          'phase-fire': {
+            'roth-ira': { personal: 500 },
+            r401k: { personal: 900 },
+            taxable: { personal: 5000 },
+            hysa: { personal: 5000 },
+          },
+        },
+      },
+    };
+    const metrics = scenarioBudgetMetrics(exampleData, scenario, 1, 'phase-fire');
+    expect(metrics.takeHomeContributions).toBe(500);
+    expect(metrics.remaining).toBe(1000);
+    expect(metrics.payrollPersonal).toBe(900);
+    const zeroExpenseScenario = { ...scenario, overrides: { ...scenario.overrides, budgetAmounts: { expenses: 0 } } };
+    expect(scenarioBudgetMetrics(exampleData, zeroExpenseScenario, 1, 'phase-fire').remaining).toBe(4500);
   });
 });

@@ -1,7 +1,5 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap');
-
 :root {
-  font-family: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+  font-family: 'Segoe UI Variable', 'Segoe UI', ui-sans-serif, system-ui, sans-serif;
   color: #e8f1f3;
   background: #06161d;
   font-synthesis: none;
@@ -79,6 +77,12 @@ h1, h2, h3, p { margin-top: 0; }
 .quick-nav button:hover { border-color: #2a5866; color: #dcebed; background: #0d2832; }
 .quick-nav svg { width: 15px; color: var(--green); }
 .quick-nav svg:last-child { margin-left: auto; color: #607b84; }
+
+.main-input-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; margin-bottom: 18px; align-items: start; }
+.main-input-grid > .panel { margin-bottom: 0; }
+.main-input-grid .editor-stack, .workspace > .panel > .account-list, .workspace > .panel > .inline-fire-phase { padding: 18px 22px 22px; }
+.inline-fire-phase .phase-contributions { padding-top: 0; border-top: 0; }
+.goal-matched-value { color: var(--green); font-weight: 800; }
 
 .panel { background: rgba(9, 31, 40, .82); border: 1px solid var(--line); border-radius: 15px; margin-bottom: 18px; overflow: hidden; box-shadow: 0 12px 35px rgba(0, 8, 12, .08); }
 .panel-head { padding: 20px 22px 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -183,6 +187,11 @@ td small { display: block; margin-top: 3px; color: #69848d; font-size: 9px; }
 .allocation-summary > b { min-width: 115px; display: grid; text-align: right; font: 800 19px 'Manrope'; color: var(--green); }
 .allocation-summary.negative > b { color: var(--red); }
 .allocation-summary > b small { color: #69848d; font: 500 8px 'DM Sans'; }
+.scale-explanation { margin: 10px 22px 0; padding: 11px 13px; display: grid; gap: 4px; border: 1px solid rgba(101,167,255,.2); border-radius: 9px; background: rgba(101,167,255,.045); }
+.scale-explanation strong { color: #bcd4dc; font-size: 10px; }
+.scale-explanation span { color: #78929a; font-size: 9px; line-height: 1.5; }
+.scale-explanation span b { color: #b7cbd1; }
+.unassigned-text { color: var(--amber); font-weight: 800; }
 .text-button { color: var(--green); display: inline-flex; gap: 5px; align-items: center; border: 0; padding: 3px; background: transparent; font-size: 11px; font-weight: 700; cursor: pointer; }
 .text-button.danger { color: var(--red); }
 .budget-bars { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; padding: 20px 22px 5px; }
@@ -331,6 +340,7 @@ select option { color: #e6f0f2; background: #0b252f; }
 .phase-row strong { font-size: 9.5px; color: #a5b8be; }
 .mini-money { height: 33px; display: flex; align-items: center; gap: 2px; color: #67828b; border: 1px solid #21424d; background: #0b2933; border-radius: 6px; padding: 0 7px; }
 .mini-money input { width: 100%; min-width: 0; color: #e4edef; border: 0; background: transparent; outline: 0; }
+.pending-value { color: var(--amber) !important; }
 .ratio-target { display: grid; grid-template-columns: 1fr repeat(3, 100px); gap: 9px; align-items: end; padding: 13px; border: 1px solid #1f414c; border-radius: 9px; }
 .ratio-target > span { align-self: center; font-size: 11px; font-weight: 700; }
 .budget-items { display: grid; gap: 6px; }
@@ -364,6 +374,7 @@ select option { color: #e6f0f2; background: #0b252f; }
 @media (max-width: 1120px) {
   .metrics-grid { grid-template-columns: repeat(3, 1fr); }
   .quick-nav { grid-template-columns: repeat(2, 1fr); }
+  .main-input-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 760px) {
@@ -379,6 +390,7 @@ select option { color: #e6f0f2; background: #0b252f; }
   .metric { min-height: 112px; }
   .quick-nav { grid-template-columns: 1fr 1fr; }
   .panel-head { padding: 17px 15px 0; }
+  .main-input-grid .editor-stack, .workspace > .panel > .account-list, .workspace > .panel > .inline-fire-phase { padding: 16px 15px 18px; }
   .scenario-strip, .chart-controls { padding-left: 15px; padding-right: 15px; }
   .main-chart { height: 355px; }
   .chart-key { justify-content: flex-start; overflow-x: auto; padding-left: 15px; }

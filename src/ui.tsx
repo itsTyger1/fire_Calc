@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ChevronDown, Info } from 'lucide-react';
 
 export const money = (value: number, compact = false) => {
@@ -12,6 +12,62 @@ export const money = (value: number, compact = false) => {
 export const percent = (value: number, digits = 1) => `${(value * 100).toFixed(digits)}%`;
 export const age = (value?: number | null) => value == null || !Number.isFinite(value) ? 'Not reached' : `Age ${value.toFixed(1)}`;
 
+const numberText = (value: number) => Number.isFinite(value) ? String(value) : '';
+
+export function CommittedNumberInput({ value, onCommit, min, max, step = 1, ariaLabel, className }: {
+  value: number;
+  onCommit: (value: number) => void;
+  min?: number;
+  max?: number;
+  step?: number;
+  ariaLabel?: string;
+  className?: string;
+}) {
+  const [draft, setDraft] = useState(() => numberText(value));
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (document.activeElement !== inputRef.current) setDraft(numberText(value));
+  }, [value]);
+
+  const commit = () => {
+    const parsed = Number(draft);
+    if (draft.trim() === '' || !Number.isFinite(parsed)) {
+      setDraft(numberText(value));
+      return;
+    }
+    const next = Math.min(max ?? Infinity, Math.max(min ?? -Infinity, parsed));
+    setDraft(numberText(next));
+    onCommit(next);
+  };
+  const pending = draft !== numberText(value);
+
+  return <input
+    ref={inputRef}
+    className={[className, pending ? 'pending-value' : ''].filter(Boolean).join(' ')}
+    aria-label={ariaLabel}
+    title="Press Enter to apply this value. Press Escape to cancel."
+    type="number"
+    value={draft}
+    step={step}
+    min={min}
+    max={max}
+    onChange={(event) => setDraft(event.target.value)}
+    onFocus={(event) => event.currentTarget.select()}
+    onClick={(event) => { if (!pending) event.currentTarget.select(); }}
+    onBlur={() => setDraft(numberText(value))}
+    onKeyDown={(event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        commit();
+      } else if (event.key === 'Escape') {
+        setDraft(numberText(value));
+        event.currentTarget.blur();
+      }
+    }}
+  />;
+}
+
 export function Field({ label, value, onChange, prefix, suffix, step = 1, min, max, hint, error }: {
   label: string; value: number; onChange: (value: number) => void; prefix?: string; suffix?: string;
   step?: number; min?: number; max?: number; hint?: string; error?: string;
@@ -20,8 +76,7 @@ export function Field({ label, value, onChange, prefix, suffix, step = 1, min, m
     <span className="field-label">{label}{hint && <span className="hint" title={hint}><Info size={13} /></span>}</span>
     <span className={`input-shell ${error ? 'invalid' : ''}`}>
       {prefix && <span>{prefix}</span>}
-      <input type="number" value={Number.isFinite(value) ? value : ''} step={step} min={min} max={max}
-        onChange={(event) => onChange(event.target.value === '' ? 0 : Number(event.target.value))} />
+      <CommittedNumberInput value={value} step={step} min={min} max={max} onCommit={onChange} />
       {suffix && <span>{suffix}</span>}
     </span>
     {error && <small className="field-error">{error}</small>}
