@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { defaultData } from './defaults';
+import { defaultData } from '../src/domain/defaults';
 import {
   aggregateAccounts, annualToMonthlyRate, applyScenarioOverrides, calculateFireNumber,
   emergencyFundMetrics, findFireCrossing, growAccountOneMonth, projectCore,
   projectScenario, resolvePhase, scenarioBudgetMetrics, solveRequiredAdditionalContribution,
   solveRequiredContributionScale,
-} from './calculations';
-import type { Account, Profile } from './types';
+} from '../src/domain/calculations';
+import type { Account, Profile } from '../src/domain/types';
 
 const profile = { ...defaultData.profile, currentAge: 30, retirementAge: 31, maxAge: 31, annualSpending: 12000, withdrawalRate: 0.04 };
 const account: Account = { ...defaultData.accounts[3], id: 'test', balance: 10000, monthlyContribution: 100, employerContribution: 50, fireEligible: true };
@@ -120,7 +120,7 @@ describe('financial calculations', () => {
     expect(metrics.phase.id).toBe('phase-fire');
     expect(metrics.rows.find((row) => row.account.id === 'taxable')?.personal).toBe(850);
     expect(metrics.cashSavings).toBe(250);
-    expect(metrics.remaining).toBe(1622);
+    expect(metrics.remaining).toBe(522);
   });
   it('accounts for every take-home dollar in every FIRE-phase scenario', () => {
     defaultData.scenarios.forEach((scenario) => {
@@ -129,7 +129,7 @@ describe('financial calculations', () => {
       expect(metrics.needs + metrics.wants + fromTakeHome + metrics.remaining).toBeCloseTo(metrics.takeHomeIncome);
     });
   });
-  it('subtracts expenses and Roth IRA only from deposited take-home', () => {
+  it('subtracts expenses, Roth IRA, taxable brokerage, and cash savings from deposited take-home', () => {
     const exampleData = {
       ...defaultData,
       profile: { ...defaultData.profile, netMonthlyIncome: 5000 },
@@ -142,17 +142,73 @@ describe('financial calculations', () => {
           'phase-fire': {
             'roth-ira': { personal: 500 },
             r401k: { personal: 900 },
-            taxable: { personal: 5000 },
-            hysa: { personal: 5000 },
+            taxable: { personal: 250 },
+            hysa: { personal: 300 },
           },
         },
       },
     };
     const metrics = scenarioBudgetMetrics(exampleData, scenario, 1, 'phase-fire');
-    expect(metrics.takeHomeContributions).toBe(500);
-    expect(metrics.remaining).toBe(1000);
+    expect(metrics.takeHomeContributions).toBe(1050);
+    expect(metrics.remaining).toBe(450);
     expect(metrics.payrollPersonal).toBe(900);
     const zeroExpenseScenario = { ...scenario, overrides: { ...scenario.overrides, budgetAmounts: { expenses: 0 } } };
-    expect(scenarioBudgetMetrics(exampleData, zeroExpenseScenario, 1, 'phase-fire').remaining).toBe(4500);
+    expect(scenarioBudgetMetrics(exampleData, zeroExpenseScenario, 1, 'phase-fire').remaining).toBe(3950);
+  });
+  it('keeps brokerage cash flow independent of net-worth and FIRE display toggles', () => {
+    const data = structuredClone(defaultData);
+    const taxable = data.accounts.find((item) => item.id === 'taxable')!;
+    taxable.includeInNetWorth = false;
+    taxable.fireEligible = false;
+    const scenario = structuredClone(data.scenarios[0]);
+    scenario.overrides.phaseContributions = { 'phase-fire': { taxable: { personal: 3000 } } };
+    const metrics = scenarioBudgetMetrics(data, scenario, 1, 'phase-fire');
+    expect(metrics.takeHomeContributions).toBe(3875);
+    expect(metrics.remaining).toBe(-1628);
+    expect(defaultData.phases.find((phase) => phase.id === 'phase-fire')!.contributions.taxable.personal).toBe(850);
+  });
+  it('deducts the selected phase cash savings without double-counting payroll or employer money', () => {
+    const emergency = scenarioBudgetMetrics(defaultData, defaultData.scenarios[0], 1, 'phase-emergency');
+    const fire = scenarioBudgetMetrics(defaultData, defaultData.scenarios[0], 1, 'phase-fire');
+    expect(emergency.cashSavings).toBe(2100);
+    expect(emergency.takeHomeContributions).toBe(2725);
+    expect(emergency.remaining).toBe(-478); // $6,100 - $3,853 - $625 - $2,100
+    expect(fire.cashSavings).toBe(250);
+    expect(fire.takeHomeContributions).toBe(1725);
+    expect(fire.remaining).toBe(522); // $6,100 - $3,853 - $625 - $850 - $250
+  });
+  it('uses cash overrides per phase and includes cash even when excluded from net worth', () => {
+    const data = structuredClone(defaultData);
+    data.accounts.find((item) => item.id === 'hysa')!.includeInNetWorth = false;
+    const scenario = { ...data.scenarios[0], overrides: { phaseContributions: {
+      'phase-emergency': { hysa: { personal: 1000, employer: 999 }, r401k: { personal: 9999 } },
+    } } };
+    expect(scenarioBudgetMetrics(data, scenario, 1, 'phase-emergency').remaining).toBe(622);
+    expect(scenarioBudgetMetrics(data, scenario, 1, 'phase-fire').remaining).toBe(522);
+    expect(scenarioBudgetMetrics(data, data.scenarios[0], 1, 'phase-emergency').remaining).toBe(-478);
+  });
+  it('includes multiple cash accounts by type, including zero contributions', () => {
+    const data = structuredClone(defaultData);
+    const cash = data.accounts.find((item) => item.id === 'hysa')!;
+    data.accounts.push({ ...cash, id: 'cash-two', name: 'Rainy day fund', monthlyContribution: 100 });
+    expect(scenarioBudgetMetrics(data, data.scenarios[0], 1, 'phase-emergency').remaining).toBe(-578);
+    data.accounts.at(-1)!.monthlyContribution = 0;
+    expect(scenarioBudgetMetrics(data, data.scenarios[0], 1, 'phase-emergency').remaining).toBe(-478);
+  });
+  it('increases bridge basis only for personal Roth IRA contributions', () => {
+    const roth = { ...defaultData.accounts.find((item) => item.type === 'Roth IRA')!, balance: 10000, monthlyContribution: 100, employerContribution: 50, annualReturn: 0 };
+    const payroll = { ...defaultData.accounts.find((item) => item.id === 'r401k')!, balance: 0, monthlyContribution: 900, employerContribution: 500, annualReturn: 0 };
+    const points = projectCore({ profile: { ...profile, rothContributionBasis: 1000 }, accounts: [roth, payroll], phases: [] });
+    expect(points[0].accessible).toBe(1000);
+    expect(points[1].accessible).toBe(1100);
+    expect(points[12].accessible).toBe(2200);
+    expect(points[12].personalContributions).toBe(12000);
+  });
+  it('caps aggregate Roth basis at included balances and avoids double-counting immediate accounts', () => {
+    const roth = { ...defaultData.accounts.find((item) => item.type === 'Roth IRA')!, balance: 500, monthlyContribution: 0, employerContribution: 0, annualReturn: 0 };
+    const run = (accounts: Account[]) => projectCore({ profile: { ...profile, rothContributionBasis: 2000 }, accounts, phases: [] })[0].accessible;
+    expect(run([roth, { ...roth, id: 'second', balance: 750 }])).toBe(1250);
+    expect(run([{ ...roth, includeInNetWorth: false }])).toBe(0);
+    expect(run([{ ...roth, accessibility: 'Immediate' }])).toBe(500);
   });
 });

@@ -110,8 +110,9 @@ const totalsFor = (accounts: Account[], balances: Record<string, number>, rothBa
     if (account.type === 'HYSA / Cash') cash += balance;
     if (account.includeInNetWorth && account.accessibility === 'Immediate') accessible += balance;
   }
-  const rothAccount = accounts.find((account) => account.type === 'Roth IRA');
-  if (rothAccount) accessible += Math.min(balances[rothAccount.id] ?? 0, Math.max(0, rothBasis));
+  const rothBalance = accounts.filter((account) => account.type === 'Roth IRA' && account.includeInNetWorth && account.accessibility !== 'Immediate')
+    .reduce((sum, account) => sum + (balances[account.id] ?? 0), 0);
+  accessible += Math.min(rothBalance, Math.max(0, rothBasis));
   return { firePortfolio, netWorth, accessible, cash };
 };
 
@@ -138,6 +139,7 @@ export const projectCore = ({ profile, accounts, phases, extraMonthlyContributio
   const startingTotals = totalsFor(accounts, balances, profile.rothContributionBasis);
   const startingPrincipal = startingTotals.firePortfolio;
   let personalContributions = 0;
+  let rothBasis = Math.max(0, profile.rothContributionBasis);
   let employerContributions = 0;
   const points: ProjectionPoint[] = [];
   const extraAccount = accounts.find((account) => account.fireEligible && account.type === 'Taxable Brokerage')
@@ -147,7 +149,7 @@ export const projectCore = ({ profile, accounts, phases, extraMonthlyContributio
     const age = profile.currentAge + month / 12;
     const date = dateAtMonth(start, month);
     const phase = resolvePhase(phases, balances, age, date);
-    const totals = totalsFor(accounts, balances, profile.rothContributionBasis + personalContributions);
+    const totals = totalsFor(accounts, balances, rothBasis);
     const years = month / 12;
     const fireTarget = profile.mode === 'nominal' ? baseFireNumber * Math.pow(1 + profile.inflationRate, years) : baseFireNumber;
     points.push({
@@ -166,6 +168,7 @@ export const projectCore = ({ profile, accounts, phases, extraMonthlyContributio
       const scaledPersonal = isScalableFireAccount(account) ? planned.personal * Math.max(0, fireContributionScale) : planned.personal;
       const personal = Math.max(0, scaledPersonal + extra);
       const employer = Math.max(0, planned.employer);
+      if (account.type === 'Roth IRA' && account.includeInNetWorth && account.accessibility !== 'Immediate') rothBasis += personal;
       balances[account.id] = (Math.max(0, balances[account.id]) + personal + employer) * (1 + monthlyRates[account.id]);
       if (account.fireEligible) {
         personalContributions += personal;
@@ -269,6 +272,10 @@ export const emergencyFundMetrics = (cash: number, target: number, monthlySaving
   };
 };
 
+export const isTakeHomeBudgetAccount = (account: Account) =>
+  account.type === 'Roth IRA' || account.type === 'Taxable Brokerage'
+  || account.type === 'HYSA / Cash';
+
 export const scenarioBudgetMetrics = (data: AppData, scenario: Scenario, fireContributionScale = 1, phaseId?: string): ScenarioBudgetMetrics => {
   const { profile, accounts, phases } = applyScenarioOverrides(data, scenario);
   const balances = Object.fromEntries(accounts.map((account) => [account.id, account.balance]));
@@ -292,11 +299,10 @@ export const scenarioBudgetMetrics = (data: AppData, scenario: Scenario, fireCon
   // shown separately and never deducted from it a second time.
   const takeHomeIncome = data.profile.netMonthlyIncome;
   const incomeBasis = takeHomeIncome + payrollPersonal;
-  // The monthly bank-account budget contains the user's expense lines plus Roth
-  // IRA contributions. Other investment/cash accounts belong to the FIRE
-  // projection, while 401(k) contributions are already withheld from payroll.
+  // Cash savings are funded from take-home in every contribution phase.
+  // Payroll contributions are already withheld and must not be deducted twice.
   const takeHomeContributions = rows
-    .filter((row) => row.account.type === 'Roth IRA')
+    .filter((row) => isTakeHomeBudgetAccount(row.account))
     .reduce((sum, row) => sum + row.personal, 0);
   const remaining = takeHomeIncome - needs - wants - takeHomeContributions;
   return { phase, rows, needs, wants, personalWealth, employerWealth, fireInvesting, cashSavings, payrollPersonal, takeHomeContributions, takeHomeIncome, incomeBasis, remaining };

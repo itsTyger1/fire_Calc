@@ -1,5 +1,5 @@
-import { defaultData } from './defaults';
-import type { AppData } from './types';
+import { defaultData } from '../domain/defaults';
+import type { AppData } from '../domain/types';
 
 const STORAGE_KEY = 'fire-projector-v1';
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;

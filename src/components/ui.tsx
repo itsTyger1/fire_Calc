@@ -76,7 +76,7 @@ export function Field({ label, value, onChange, prefix, suffix, step = 1, min, m
     <span className="field-label">{label}{hint && <span className="hint" title={hint}><Info size={13} /></span>}</span>
     <span className={`input-shell ${error ? 'invalid' : ''}`}>
       {prefix && <span>{prefix}</span>}
-      <CommittedNumberInput value={value} step={step} min={min} max={max} onCommit={onChange} />
+      <CommittedNumberInput ariaLabel={label} value={value} step={step} min={min} max={max} onCommit={onChange} />
       {suffix && <span>{suffix}</span>}
     </span>
     {error && <small className="field-error">{error}</small>}
