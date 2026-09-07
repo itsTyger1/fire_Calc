@@ -29,6 +29,11 @@ npm ci
 npm run dev:desktop
 ```
 
+The development desktop window uses Vite hot reload. Keep it open while editing;
+renderer changes appear automatically, and **Refresh app** reloads the current
+development bundle without reinstalling anything. Use the packaged installer
+workflow below for final releases.
+
 `npm run dev` runs only the web UI. Dependencies are pinned and `package-lock.json` is committed so installation is reproducible.
 
 ```text
