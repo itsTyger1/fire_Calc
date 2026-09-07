@@ -16,6 +16,7 @@ export const monthStatus = (result: ScenarioResult) => {
 };
 
 interface ChartDatum { month: number; age: number; year: number; date: string; [key: string]: number | string }
+interface TimelineTooltipItem { dataKey?: string | number; value?: number | string; color?: string; payload?: ChartDatum }
 
 export function TimelineChart({ results, selected, onSelect }: { results: ScenarioResult[]; selected: string; onSelect: (id: string) => void }) {
   const [axis, setAxis] = useState<'age' | 'year'>('age');
@@ -30,15 +31,55 @@ export function TimelineChart({ results, selected, onSelect }: { results: Scenar
       const point = first.points[Math.min(month, first.points.length - 1)];
       const date = new Date(point.date);
       const row: ChartDatum = { month, age: point.age, year: date.getFullYear() + date.getMonth() / 12, date: point.date };
-      visible.forEach((result) => { const item = result.points[Math.min(month, result.points.length - 1)]; if (item) row[result.scenario.id] = item.firePortfolio; });
+      visible.forEach((result) => {
+        const item = result.points[Math.min(month, result.points.length - 1)];
+        if (item) {
+          row[result.scenario.id] = item.firePortfolio;
+          row[`${result.scenario.id}__target`] = item.fireTarget;
+        }
+      });
       rows.push(row);
     }
     return rows;
   }, [first, maxMonth, visible.map((r) => r.scenario.id + r.points.length).join('|')]);
 
-  const tooltip = ({ active, payload, label }: { active?: boolean; payload?: ReadonlyArray<{ dataKey?: string | number; value?: number | string; color?: string }>; label?: number | string }) => {
-    if (!active || !payload?.length) return null;
-    return <div className="chart-tooltip"><strong>{axis === 'age' ? `Age ${Number(label).toFixed(1)}` : `Year ${Math.floor(Number(label))}`}</strong>{payload.map((item) => { const key = String(item.dataKey ?? ''); const value = Number(item.value ?? 0); const result = visible.find((r) => r.scenario.id === key); const startDate = new Date(first.points[0].date); const startYear = startDate.getFullYear() + startDate.getMonth() / 12; const month = Math.round(((Number(label) - (axis === 'age' ? first.profile.currentAge : startYear)) * 12)); const p = result?.points[Math.max(0, Math.min(month, (result?.points.length ?? 1) - 1))]; return <div className="tooltip-row" key={key}><span style={{ background: item.color }} /><div><b>{result?.scenario.name}</b><small>{money(value)} · {p ? money(value - p.fireTarget) : '—'} vs target</small>{p && <small>{money(p.personalContributions + p.employerContributions)} contributed · {money(p.investmentGrowth)} growth</small>}</div></div>; })}</div>;
+  const tooltip = ({ active, payload, label }: { active?: boolean; payload?: ReadonlyArray<TimelineTooltipItem>; label?: number | string }) => {
+    const portfolioPayload = payload?.filter((item) => visible.some((result) => result.scenario.id === String(item.dataKey))) ?? [];
+    if (!active || !portfolioPayload.length) return null;
+    const anchor = portfolioPayload[0]?.payload;
+    const anchorAge = Number(anchor?.age ?? label);
+    const anchorDate = anchor?.date ? new Date(anchor.date) : null;
+    const dateLabel = anchorDate && !Number.isNaN(anchorDate.getTime())
+      ? anchorDate.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
+      : undefined;
+    return <div className="chart-tooltip">
+      <div className="tooltip-heading">
+        <strong>{axis === 'age' ? `Age ${anchorAge.toFixed(1)}` : `Calendar year ${anchorDate?.getFullYear() ?? Math.floor(Number(label))}`}</strong>
+        <span>{axis === 'age' ? dateLabel : `Age ${anchorAge.toFixed(1)}`}</span>
+      </div>
+      {portfolioPayload.map((item) => {
+        const key = String(item.dataKey ?? '');
+        const value = Number(item.value ?? 0);
+        const result = visible.find((r) => r.scenario.id === key);
+        const month = Number(item.payload?.month ?? 0);
+        const point = result?.points[Math.max(0, Math.min(Number.isFinite(month) ? month : 0, (result?.points.length ?? 1) - 1))];
+        if (!result) return null;
+        const delta = point ? value - point.fireTarget : 0;
+        const signedDelta = `${delta >= 0 ? '+' : '−'}${money(Math.abs(delta))}`;
+        return <div className="tooltip-row" key={key}>
+          <div className="tooltip-scenario"><span style={{ background: item.color ?? result.scenario.color }} /><strong>{result.scenario.name}</strong></div>
+          {point ? <dl className="tooltip-stats">
+            <div><dt>Phase</dt><dd>{point.projectionPhase === 'retirement' ? 'Retirement' : 'Accumulation'}</dd></div>
+            <div><dt>Portfolio</dt><dd>{money(value)}</dd></div>
+            <div><dt>FIRE target</dt><dd>{money(point.fireTarget)}</dd></div>
+            <div><dt>{delta >= 0 ? 'Above target' : 'Below target'}</dt><dd className={delta >= 0 ? 'positive-text' : 'negative-text'}>{signedDelta}</dd></div>
+            {point.projectionPhase === 'retirement' && <div><dt>Planned withdrawal</dt><dd>{money(point.monthlyWithdrawal)}/mo</dd></div>}
+            <div><dt>Contributions to date</dt><dd>{money(point.personalContributions + point.employerContributions)}</dd></div>
+            <div><dt>Investment growth</dt><dd>{money(point.investmentGrowth)}</dd></div>
+          </dl> : <small className="tooltip-unavailable">Value details unavailable</small>}
+        </div>;
+      })}
+    </div>;
   };
 
   if (!first || !visible.length) return <div className="empty-chart">Show at least one scenario to draw the timeline.</div>;
@@ -51,16 +92,53 @@ export function TimelineChart({ results, selected, onSelect }: { results: Scenar
       <YAxis tickFormatter={(v) => money(v, true)} stroke="#78909a" tickLine={false} axisLine={false} width={64} />
       <Tooltip content={tooltip as never} />
       <Legend formatter={(id) => visible.find((r) => r.scenario.id === id)?.scenario.name ?? id} onClick={(item) => onSelect(String(item.dataKey))} />
-      {visible.map((result, index) => <ReferenceLine key={`goal-${result.scenario.id}`} y={result.fireNumber} stroke={result.scenario.color} strokeDasharray={`${3 + index} 6`} strokeOpacity={0.35} />)}
+      {visible.map((result, index) => <Line key={`target-${result.scenario.id}`} dataKey={`${result.scenario.id}__target`} stroke={result.scenario.color} strokeWidth={1.4} strokeDasharray={`${3 + index} 6`} strokeOpacity={0.35} dot={false} activeDot={false} legendType="none" />)}
+      {visible.map((result) => {
+        const retirementPoint = result.points.find((point) => point.projectionPhase === 'retirement');
+        if (!retirementPoint) return null;
+        const retirementDate = new Date(retirementPoint.date);
+        const x = axis === 'age' ? retirementPoint.age : retirementDate.getFullYear() + retirementDate.getMonth() / 12;
+        return <ReferenceLine key={`retirement-${result.scenario.id}`} x={x} stroke={result.scenario.color} strokeDasharray="7 5" strokeOpacity={0.6} />;
+      })}
       {visible.map((result) => <Line key={result.scenario.id} dataKey={result.scenario.id} type="monotone" stroke={result.scenario.color} strokeWidth={selected === result.scenario.id ? 4 : 2.4} dot={false} activeDot={{ r: 5 }} opacity={selected && selected !== result.scenario.id ? .42 : 1} style={selected === result.scenario.id ? { filter: `url(#glow-${result.scenario.id})` } : undefined} />)}
       {visible.map((result) => result.firePoint && result.firePoint.month <= maxMonth ? <ReferenceDot key={`dot-${result.scenario.id}`} x={axis === 'age' ? result.firePoint.age : new Date(result.firePoint.date).getFullYear() + new Date(result.firePoint.date).getMonth() / 12} y={result.firePoint.firePortfolio} r={5} fill={result.scenario.color} stroke="#071b24" strokeWidth={2} /> : null)}
     </ComposedChart></ResponsiveContainer></div>
-    <div className="chart-key"><span><i className="solid-line" /> Portfolio projection</span><span><i className="dash-line" /> Matching FIRE target</span><span><i className="dot-key" /> First target crossing</span></div>
+    <div className="chart-key"><span><i className="solid-line" /> Portfolio balance</span><span><i className="dash-line" /> FIRE target</span><span><i className="retirement-line" /> Retirement begins</span><span><i className="dot-key" /> First target crossing</span></div>
   </>;
 }
 
 export function SummaryTable({ results, selected, onSelect }: { results: ScenarioResult[]; selected: string; onSelect: (id: string) => void }) {
   return <div className="table-wrap"><table><thead><tr><th>Scenario</th><th>FIRE goal</th><th>FIRE age / date</th><th>At target age</th><th>Monthly investing</th><th>Surplus / shortfall</th><th>Status</th></tr></thead><tbody>{results.map((result) => { const delta = result.targetPoint.firePortfolio - result.targetPoint.fireTarget; const status = monthStatus(result); return <tr key={result.scenario.id} className={selected === result.scenario.id ? 'selected' : ''} onClick={() => onSelect(result.scenario.id)}><td><i style={{ background: result.scenario.color }} /><strong>{result.scenario.name}</strong></td><td>{money(result.fireNumber, true)}</td><td><strong>{age(result.firePoint?.age)}</strong><small>{result.firePoint ? new Date(result.firePoint.date).toLocaleDateString(undefined, { month: 'short', year: 'numeric' }) : `By age ${result.profile.maxAge}`}</small></td><td>{money(result.targetPoint.firePortfolio, true)}</td><td>{money(result.plannedPersonalMonthly + result.plannedEmployerMonthly)}/mo<small>{money(result.plannedEmployerMonthly)} employer</small></td><td className={delta >= 0 ? 'positive-text' : 'negative-text'}>{delta >= 0 ? '+' : ''}{money(delta, true)}</td><td><span className={`status ${status.tone}`}>{status.text}</span></td></tr>; })}</tbody></table></div>;
+}
+
+export function RetirementDrawdown({ result }: { result: ScenarioResult }) {
+  const summary = result.retirementSummary;
+  const endingPoint = result.points.at(-1)!;
+  const depleted = Boolean(summary.depletionPoint);
+  const withdrawalMode = result.profile.mode === 'nominal' ? 'rises with inflation' : 'stays level in today’s dollars';
+  const targetMethod = result.profile.customFireNumber == null
+    ? `${percent(result.profile.withdrawalRate)} withdrawal rate sizes the FIRE target; withdrawals use your spending amount.`
+    : 'Your custom FIRE target is used; withdrawals use your spending amount.';
+  return <Section
+    title="Retirement drawdown"
+    eyebrow="Withdrawal phase"
+    action={<span className={`status ${depleted ? 'negative' : 'positive'}`}>{depleted ? 'Projected depletion' : 'Lasts through projection'}</span>}
+  >
+    <div className={`drawdown-callout ${depleted ? 'negative' : 'positive'}`}>
+      <div>
+        <strong>{depleted ? `Projected depletion at age ${summary.depletionPoint!.age.toFixed(1)}` : `Projected to last through age ${endingPoint.age.toFixed(1)}`}</strong>
+        <p>Contributions stop at age {summary.startAge.toFixed(1)}. {targetMethod} Planned withdrawals {withdrawalMode}; this baseline uses deterministic returns and does not model taxes or account withdrawal order.</p>
+      </div>
+    </div>
+    <div className="mini-metrics drawdown-metrics">
+      <div><span>Retirement starts</span><strong>Age {summary.startAge.toFixed(1)}</strong></div>
+      <div><span>First-year withdrawal</span><strong>{money(summary.firstYearWithdrawal)}/yr</strong></div>
+      <div><span>Balance at retirement</span><strong>{money(summary.balanceAtRetirement)}</strong></div>
+      <div><span>Balance at max age</span><strong>{money(summary.endingBalance)}</strong></div>
+      <div><span>Lowest projected balance</span><strong>{money(summary.lowestBalance)}</strong></div>
+    </div>
+    {summary.totalWithdrawalShortfall > 0 && <p className="drawdown-warning">{money(summary.totalWithdrawalShortfall)} of planned withdrawals could not be funded after the FIRE portfolio reached $0.</p>}
+  </Section>;
 }
 
 export function Analytics({ result, data }: { result: ScenarioResult; data: AppData }) {
@@ -81,7 +159,7 @@ export function Analytics({ result, data }: { result: ScenarioResult; data: AppD
       <div className="allocation-chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={allocations} layout="vertical" margin={{ left: 16, right: 20 }}><XAxis type="number" hide /><YAxis type="category" dataKey="name" width={112} tick={{ fill: '#a9bac0', fontSize: 11 }} axisLine={false} tickLine={false} /><Tooltip formatter={(v) => money(Number(v))} /><Bar dataKey="value" radius={[0, 5, 5, 0]}>{allocations.map((_, i) => <Cell key={i} fill={allocationColors[i % allocationColors.length]} />)}</Bar></BarChart></ResponsiveContainer></div>
     </Section>
     <Section title="Account balances over time" eyebrow="Selected scenario · independent balances" className="wide-panel">
-      <div className="account-chart-note"><span>Each line is one account—not a cumulative stack.</span><span>Monthly contribution → monthly compounded growth</span></div>
+      <div className="account-chart-note"><span>Each line is one account—not a cumulative stack.</span><span>Contributions before retirement · withdrawals after</span></div>
       <div className="account-chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={accountData} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}><CartesianGrid vertical={false} stroke="#193642" /><XAxis dataKey="age" tickFormatter={(v) => Number(v).toFixed(0)} stroke="#78909a" axisLine={false} tickLine={false} /><YAxis tickFormatter={(v) => money(v, true)} stroke="#78909a" width={58} axisLine={false} tickLine={false} /><Tooltip formatter={(v) => money(Number(v))} labelFormatter={(v) => `Age ${Number(v).toFixed(0)}`} />{result.accounts.map((account, i) => <Line key={account.id} type="monotone" dataKey={account.id} name={account.name} stroke={scenarioColors[i % scenarioColors.length]} strokeWidth={2.2} dot={false} activeDot={{ r: 4 }} />)}</LineChart></ResponsiveContainer></div>
     </Section>
   </div>;

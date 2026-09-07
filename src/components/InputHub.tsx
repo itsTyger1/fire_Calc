@@ -1,10 +1,10 @@
-import { useState, type Dispatch, type SetStateAction } from 'react';
-import { Copy, Plus, RefreshCcw, Trash2 } from 'lucide-react';
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { ChevronDown, Copy, Plus, RefreshCcw, Trash2 } from 'lucide-react';
 import type { AppData, Scenario } from '../domain/types';
 import { scenarioColors } from '../domain/defaults';
 import { applyScenarioOverrides, isTakeHomeBudgetAccount, scenarioBudgetMetrics } from '../domain/calculations';
 import { AccountsEditor, BudgetEditor, ProfileEditor } from './Editors';
-import { CommittedNumberInput, Field, money, SelectField, TextField, Toggle } from './ui';
+import { CommittedNumberInput, Field, money, SelectField, Toggle } from './ui';
 
 type Setter = Dispatch<SetStateAction<AppData>>;
 type Tab = 'plan' | 'money' | 'accounts';
@@ -19,10 +19,39 @@ export function InputHub({ data, setData, scenario, setSelected, phaseId, setPha
   phaseId?: string; setPhaseId: (id: string) => void;
 }) {
   const [tab, setTab] = useState<Tab>('money');
+  const [scenarioMenuOpen, setScenarioMenuOpen] = useState(false);
+  const [scenarioDraftName, setScenarioDraftName] = useState(scenario.name);
+  const scenarioPickerRef = useRef<HTMLDivElement>(null);
   const budget = scenarioBudgetMetrics(data, scenario, 1, phaseId);
   const effective = applyScenarioOverrides(data, scenario);
   const patchScenario = (patch: Partial<Scenario>) => setData((old) => ({ ...old, scenarios: old.scenarios.map((item) => item.id === scenario.id ? { ...item, ...patch } : item) }));
   const patchOverride = (patch: Scenario['overrides']) => patchScenario({ overrides: { ...scenario.overrides, ...patch } });
+  useEffect(() => setScenarioDraftName(scenario.name), [scenario.id, scenario.name]);
+  const commitScenarioName = () => {
+    const nextName = scenarioDraftName.trim();
+    if (!nextName) setScenarioDraftName(scenario.name);
+    else if (nextName !== scenario.name) patchScenario({ name: nextName });
+  };
+  const selectScenario = (id: string) => {
+    const next = data.scenarios.find((item) => item.id === id);
+    if (!next) return;
+    setScenarioDraftName(next.name);
+    setScenarioMenuOpen(false);
+    setSelected(id);
+  };
+  const visibleScenarioOptions = scenarioDraftName === scenario.name
+    ? data.scenarios
+    : data.scenarios.filter((item) => item.name.toLowerCase().includes(scenarioDraftName.trim().toLowerCase()));
+  useEffect(() => {
+    if (!scenarioMenuOpen) return;
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (scenarioPickerRef.current?.contains(event.target as Node)) return;
+      commitScenarioName();
+      setScenarioMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', closeOnOutsideClick);
+    return () => document.removeEventListener('pointerdown', closeOnOutsideClick);
+  }, [scenarioMenuOpen, scenarioDraftName, scenario.name]);
   const updateShared = <K extends keyof AppData['profile']>(key: K, value: AppData['profile'][K]) => setData((old) => ({ ...old, profile: { ...old.profile, [key]: value } }));
   const addScenario = (duplicate: boolean) => {
     const next: Scenario = {
@@ -44,10 +73,9 @@ export function InputHub({ data, setData, scenario, setSelected, phaseId, setPha
   return <section id="inputs" className="input-hub" aria-labelledby="input-heading">
     <div className="input-intro"><div><span className="eyebrow">Set up once. Explore below.</span><h1 id="input-heading">Your FIRE plan</h1><p>All your inputs in one place. Press <kbd>Enter</kbd> to apply a number; <kbd>Esc</kbd> to cancel. Changes save automatically.</p></div><a href="#results" className="button primary">View results ↓</a></div>
     <div className="scenario-toolbar">
-      <SelectField label="Scenario you’re editing" value={scenario.id} onChange={setSelected}>{data.scenarios.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</SelectField>
+      <div ref={scenarioPickerRef} className="field scenario-picker"><span className="field-label">Scenario you’re editing</span><span className="scenario-picker-control"><span className="scenario-picker-input-wrap"><input className="text-input" role="combobox" aria-label="Scenario you’re editing" aria-expanded={scenarioMenuOpen} aria-controls="scenario-options" value={scenarioDraftName} onFocus={() => setScenarioMenuOpen(true)} onClick={() => setScenarioMenuOpen(true)} onChange={(event) => { setScenarioDraftName(event.target.value); setScenarioMenuOpen(true); }} onBlur={() => { window.setTimeout(() => { commitScenarioName(); setScenarioMenuOpen(false); }, 0); }} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commitScenarioName(); setScenarioMenuOpen(false); } else if (event.key === 'Escape') { event.preventDefault(); setScenarioDraftName(scenario.name); setScenarioMenuOpen(false); } }} /><ChevronDown className="scenario-picker-chevron" size={15} aria-hidden="true" /></span><button type="button" className="icon-button" disabled={data.scenarios.length >= 8} onClick={() => addScenario(false)} aria-label="Add scenario" title="Add scenario"><Plus size={17} /></button></span>{scenarioMenuOpen && <div className="scenario-picker-menu" id="scenario-options" role="listbox">{visibleScenarioOptions.length > 0 ? visibleScenarioOptions.map((item) => <button type="button" role="option" aria-selected={item.id === scenario.id} key={item.id} onMouseDown={(event) => { event.preventDefault(); selectScenario(item.id); }}>{item.name}</button>) : <span className="scenario-picker-empty">No matching scenarios</span>}</div>}</div>
       <p>Goals and monthly amounts apply to this scenario. Fields marked “shared” apply to every scenario.</p>
-      <details className="scenario-options"><summary>Manage scenarios</summary><div className="scenario-options-body">
-        <TextField label="Scenario name" value={scenario.name} onChange={(name) => patchScenario({ name })} />
+      <div className="scenario-toolbar-actions"><details className="scenario-options"><summary>Manage scenarios</summary><div className="scenario-options-body">
         <Toggle label="Show on timeline" checked={scenario.visible} onChange={(visible) => patchScenario({ visible })} />
         <div className="scenario-modal-actions"><button className="button secondary" disabled={data.scenarios.length >= 8} onClick={() => addScenario(false)}><Plus size={14} /> New</button><button className="button secondary" disabled={data.scenarios.length >= 8} onClick={() => addScenario(true)}><Copy size={14} /> Duplicate</button></div>
         <button className="button secondary" onClick={() => { if (window.confirm(`Reset all overrides for ${scenario.name}?`)) patchScenario({ overrides: {} }); }}><RefreshCcw size={14} /> Reset scenario</button>
@@ -56,7 +84,7 @@ export function InputHub({ data, setData, scenario, setSelected, phaseId, setPha
           setData((old) => ({ ...old, scenarios: old.scenarios.filter((item) => item.id !== scenario.id) }));
           setSelected(data.scenarios.find((item) => item.id !== scenario.id)!.id);
         }}><Trash2 size={14} /> Delete scenario</button>
-      </div></details>
+      </div></details></div>
     </div>
     <div className="input-tabs" role="tablist" aria-label="Plan inputs">
       {tabs.map((item, index) => <button key={item.id} id={`tab-${item.id}`} role="tab" aria-selected={tab === item.id} aria-controls={`panel-${item.id}`} tabIndex={tab === item.id ? 0 : -1} onClick={() => setTab(item.id)} onKeyDown={(event) => {
@@ -82,7 +110,7 @@ export function InputHub({ data, setData, scenario, setSelected, phaseId, setPha
       {tab === 'money' && <>
         <div className="input-section-heading"><div><h2>Monthly take-home budget</h2><p>Enter each expense and investment once. Your plan uses the same amounts everywhere.</p></div><button className="button ghost" onClick={() => { if (window.confirm('Reset this scenario’s expenses and the selected phase’s contributions?')) resetBudget(); }}><RefreshCcw size={14} /> Reset monthly amounts</button></div>
         <div className="budget-live-total" role="status"><div><span>Deposited take-home</span><strong>{money(budget.takeHomeIncome)}</strong></div><div><span>Expenses</span><strong>− {money(budget.needs + budget.wants)}</strong></div><div><span>Take-home savings & investments</span><strong>− {money(budget.takeHomeContributions)}</strong></div><div className={budget.remaining < 0 ? 'negative-text' : budget.remaining > 0 ? 'unassigned-text' : 'positive-text'}><span>{budget.remaining < 0 ? 'Over budget' : 'Unassigned take-home'}</span><strong>{money(Math.abs(budget.remaining))}</strong></div></div>
-        <div className="monthly-input-grid"><div><h3>Income & expenses</h3><BudgetEditor data={data} setData={setData} scenario={scenario} /></div><div><h3>Investments & savings</h3>
+        <div className="monthly-input-grid"><div><h3>Income & expenses</h3><BudgetEditor data={data} setData={setData} scenario={scenario} budget={budget} /></div><div><h3>Investments & savings</h3>
           <ContributionsEditor data={data} setData={setData} scenario={scenario} phaseId={phaseId} setPhaseId={setPhaseId} />
         </div></div>
       </>}
@@ -110,11 +138,11 @@ function ContributionsEditor({ data, setData, scenario, phaseId, setPhaseId }: {
     <SelectField label="Contribution phase" value={phase.id} onChange={setPhaseId}>{data.phases.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</SelectField>
     <p className="muted">{triggerText}. The budget breakdown below shows this phase; the FIRE projection follows all phases.</p>
     <div className="monthly-contributions"><div className="monthly-contribution-head"><span>Account</span><span>You / month</span><span>Employer / month</span></div>
-      {[...budget.rows].sort((a, b) => Number(isTakeHomeBudgetAccount(b.account)) - Number(isTakeHomeBudgetAccount(a.account))).map((row) => <div className="monthly-contribution-row" key={row.account.id}><div><strong>{row.account.name}</strong><small>{isTakeHomeBudgetAccount(row.account) ? 'Deducted from take-home' : row.isPayroll ? 'Payroll · already withheld' : 'Tracked outside this budget'}</small></div>
+      {[...budget.rows].sort((a, b) => Number(isTakeHomeBudgetAccount(b.account)) - Number(isTakeHomeBudgetAccount(a.account))).map((row) => <div className="monthly-contribution-row" key={row.account.id}><div><strong>{row.account.name}</strong><small>{row.isPayroll ? 'Payroll · already withheld' : 'Deducted from take-home'}</small></div>
         <span className="mini-money">$<CommittedNumberInput ariaLabel={`${row.account.name} monthly contribution`} min={0} value={Math.round(row.personal * 100) / 100} onCommit={(value) => update(row.account.id, 'personal', value)} /></span>
         <span className="mini-money">$<CommittedNumberInput ariaLabel={`${row.account.name} employer contribution`} min={0} value={Math.round(row.employer * 100) / 100} onCommit={(value) => update(row.account.id, 'employer', value)} /></span>
       </div>)}
     </div>
-    <p className="fine-print">Roth IRA, taxable brokerage, and HYSA/cash savings reduce unassigned take-home in every phase. Payroll and employer contributions are not deducted again. Other account types remain outside this budget.</p>
+    <p className="fine-print">Personal contributions to non-payroll accounts reduce unassigned take-home in every phase. Payroll 401(k) and employer contributions are already withheld or paid separately and are not deducted again.</p>
   </div>;
 }

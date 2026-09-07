@@ -12,13 +12,13 @@ All editable settings are in the input area at the top:
 - **Monthly money:** deposited take-home, expenses, and every account’s personal and employer contributions. Choose a contribution phase here; the budget breakdown below follows that selection.
 - **Accounts:** shared balances, account types, eligibility, returns, and optional holdings. Contributions have a single editor in Monthly money.
 
-Press **Enter** to apply a numeric edit or **Escape** to cancel. Leaving a numeric field without pressing Enter discards that draft. Applied changes save automatically. All charts, metrics, and budget comparisons appear below the inputs. Use **View results** and **Edit inputs** to jump between them.
+Press **Enter** to apply a numeric edit or **Escape** to cancel. Leaving a numeric field without pressing Enter discards that draft. Applied changes save automatically. All charts, metrics, and budget comparisons appear below the inputs. Use **View results** to jump to the results.
 
-The take-home formula preserves the configured budget scope:
+The take-home formula uses the configured deposited income and all personal non-payroll contributions:
 
-`Deposited take-home − expenses − Roth IRA − taxable brokerage − HYSA/cash savings = unassigned take-home`
+`Deposited take-home − expenses − personal non-payroll contributions = unassigned take-home`
 
-Payroll retirement and employer contributions are not deducted again. HYSA/cash savings are deducted in every contribution phase using the selected personal contribution. Other account types remain tracked outside this remainder and are labeled accordingly. Gross income remains supported in imported data but has no input because it does not affect the calculation.
+401(k) payroll and employer contributions are not deducted again because they are already withheld or paid separately. Gross income remains supported in imported data but has no input because it does not affect the calculation.
 
 ## Development
 
@@ -75,5 +75,8 @@ The UI test checks input placement, read-only results, Enter-only commits, budge
 - Monthly return is `(1 + annualRate)^(1/12) - 1`.
 - Real-dollar mode holds the FIRE target constant; nominal mode inflates it monthly.
 - The projection follows all contribution phases, independent of the phase selected for budget editing.
+- The FIRE crossing is calculated from the accumulation projection. At the selected retirement age, contributions stop and the full projection begins monthly withdrawals equal to annual retirement spending divided by 12.
+- Real-dollar withdrawals stay level; nominal-dollar withdrawals rise with inflation. Retirement withdrawals are drawn proportionally from FIRE-eligible accounts in this baseline and are not tax- or account-order-aware.
+- The drawdown is a deterministic estimate using the configured return assumptions; it does not represent a probability of success or model market sequence risk.
 - Required contributions use a binary search against the same projection engine.
 - Bridge estimates add only personal Roth IRA contributions to the entered Roth IRA basis.

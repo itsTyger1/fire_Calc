@@ -3,6 +3,22 @@ import type { AppData } from '../domain/types';
 
 const STORAGE_KEY = 'fire-projector-v1';
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+const legacyStarterScenarios = [
+  { id: 'base', name: 'Base FIRE at 50', overrides: {} },
+  { id: 'conservative', name: 'Conservative returns', overrides: { realReturn: 0.04 } },
+  { id: 'higher', name: 'Higher contributions', overrides: { contributionScale: 1.2, contributions: { taxable: { personal: 1342 } } } },
+  { id: 'lower', name: 'Lower contributions', overrides: { contributionScale: 0.72 } },
+  { id: 'lifestyle', name: 'Higher retirement lifestyle', overrides: { annualSpending: 61250 } },
+];
+const migrateStarterScenarios = (data: AppData): AppData => {
+  const isUntouchedLegacySet = data.scenarios.length === legacyStarterScenarios.length
+    && data.scenarios.every((scenario) => {
+      const legacy = legacyStarterScenarios.find((item) => item.id === scenario.id);
+      return legacy && scenario.name === legacy.name && scenario.visible
+        && JSON.stringify(scenario.overrides) === JSON.stringify(legacy.overrides);
+    });
+  return isUntouchedLegacySet ? { ...data, scenarios: clone(defaultData.scenarios) } : data;
+};
 const normalizeData = (data: AppData): AppData => ({
   ...data,
   accounts: data.accounts.map((account) => account.type === 'Crypto' && account.returnMode === undefined
@@ -19,7 +35,7 @@ export const loadData = (): AppData => {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return clone(defaultData);
     const parsed = JSON.parse(raw) as AppData;
-    return parsed.version === 1 ? normalizeData(parsed) : clone(defaultData);
+    return parsed.version === 1 ? migrateStarterScenarios(normalizeData(parsed)) : clone(defaultData);
   } catch {
     return clone(defaultData);
   }

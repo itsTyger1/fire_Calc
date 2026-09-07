@@ -123,13 +123,35 @@ interface CoreProjection {
   extraMonthlyContribution?: number;
   fireContributionScale?: number;
   endAtTarget?: boolean;
+  includeRetirement?: boolean;
 }
 
 export const isScalableFireAccount = (account: Account) => account.fireEligible && account.type !== 'HYSA / Cash';
 
-export const projectCore = ({ profile, accounts, phases, extraMonthlyContribution = 0, fireContributionScale = 1, endAtTarget = false }: CoreProjection) => {
+const monthlyRetirementWithdrawal = (profile: Profile, month: number) => {
+  const inflationFactor = profile.mode === 'nominal'
+    ? Math.pow(1 + Math.max(-0.999999, profile.inflationRate), month / 12)
+    : 1;
+  return Math.max(0, safe(profile.annualSpending)) / 12 * inflationFactor;
+};
+
+const withdrawFromFirePortfolio = (accounts: Account[], balances: Record<string, number>, requested: number) => {
+  const available = accounts.reduce((sum, account) => sum + (account.fireEligible ? Math.max(0, balances[account.id] ?? 0) : 0), 0);
+  const actual = Math.min(Math.max(0, requested), available);
+  if (actual > 0 && available > 0) {
+    accounts.forEach((account) => {
+      if (!account.fireEligible) return;
+      const balance = Math.max(0, balances[account.id] ?? 0);
+      balances[account.id] = Math.max(0, balance - actual * balance / available);
+    });
+  }
+  return { actual, shortfall: Math.max(0, requested - actual) };
+};
+
+export const projectCore = ({ profile, accounts, phases, extraMonthlyContribution = 0, fireContributionScale = 1, endAtTarget = false, includeRetirement = false }: CoreProjection) => {
   const maxAge = endAtTarget ? profile.retirementAge : profile.maxAge;
   const totalMonths = Math.max(0, Math.ceil((maxAge - profile.currentAge) * 12));
+  const retirementStartMonth = Math.max(0, Math.round((profile.retirementAge - profile.currentAge) * 12));
   const balances = Object.fromEntries(accounts.map((account) => [account.id, Math.max(0, account.balance)]));
   const monthlyRates = Object.fromEntries(
     accounts.map((account) => [account.id, annualToMonthlyRate(annualReturnFor(account, profile))]),
@@ -141,6 +163,8 @@ export const projectCore = ({ profile, accounts, phases, extraMonthlyContributio
   let personalContributions = 0;
   let rothBasis = Math.max(0, profile.rothContributionBasis);
   let employerContributions = 0;
+  let cumulativeWithdrawals = 0;
+  let cumulativeWithdrawalShortfall = 0;
   const points: ProjectionPoint[] = [];
   const extraAccount = accounts.find((account) => account.fireEligible && account.type === 'Taxable Brokerage')
     ?? accounts.find((account) => account.fireEligible);
@@ -152,12 +176,28 @@ export const projectCore = ({ profile, accounts, phases, extraMonthlyContributio
     const totals = totalsFor(accounts, balances, rothBasis);
     const years = month / 12;
     const fireTarget = profile.mode === 'nominal' ? baseFireNumber * Math.pow(1 + profile.inflationRate, years) : baseFireNumber;
+    const inRetirement = includeRetirement && month >= retirementStartMonth;
+    const monthlyWithdrawal = inRetirement ? monthlyRetirementWithdrawal(profile, month) : 0;
     points.push({
-      month, age, date, fireTarget, ...totals, balances: { ...balances }, phaseName: phase?.name ?? 'Base contributions',
+      month, age, date, fireTarget, ...totals, balances: { ...balances }, phaseName: inRetirement ? 'Retirement drawdown' : phase?.name ?? 'Base contributions',
       startingPrincipal, personalContributions, employerContributions,
-      investmentGrowth: totals.firePortfolio - startingPrincipal - personalContributions - employerContributions,
+      investmentGrowth: totals.firePortfolio - startingPrincipal - personalContributions - employerContributions + cumulativeWithdrawals,
+      projectionPhase: inRetirement ? 'retirement' : 'accumulation',
+      monthlyWithdrawal,
+      cumulativeWithdrawals,
+      cumulativeWithdrawalShortfall,
     });
     if (month === totalMonths) break;
+
+    if (inRetirement) {
+      const withdrawal = withdrawFromFirePortfolio(accounts, balances, monthlyWithdrawal);
+      cumulativeWithdrawals += withdrawal.actual;
+      cumulativeWithdrawalShortfall += withdrawal.shortfall;
+      accounts.forEach((account) => {
+        balances[account.id] = Math.max(0, balances[account.id] ?? 0) * (1 + monthlyRates[account.id]);
+      });
+      continue;
+    }
 
     for (const account of accounts) {
       const planned: ContributionAmount = phase?.contributions[account.id] ?? {
@@ -225,8 +265,9 @@ export const solveRequiredContributionScale = (
 
 export const projectScenario = (data: AppData, scenario: Scenario): ScenarioResult => {
   const { profile, accounts, phases } = applyScenarioOverrides(data, scenario);
-  const points = projectCore({ profile, accounts, phases });
-  const firePoint = findFireCrossing(points);
+  const accumulationPoints = projectCore({ profile, accounts, phases });
+  const points = projectCore({ profile, accounts, phases, includeRetirement: true });
+  const firePoint = findFireCrossing(accumulationPoints);
   const targetMonth = clamp(Math.round((profile.retirementAge - profile.currentAge) * 12), 0, points.length - 1);
   const targetPoint = points[targetMonth];
   const current = points[0];
@@ -247,11 +288,26 @@ export const projectScenario = (data: AppData, scenario: Scenario): ScenarioResu
     return sum + (isScalableFireAccount(account) ? amount.personal * requiredContributionScale : amount.personal);
   }, 0);
   const requiredPersonalMonthly = Number.isFinite(requiredContributionScale) ? requiredPlanningPersonal : Infinity;
+  const retirementPoints = points.filter((point) => point.projectionPhase === 'retirement');
+  const endingPoint = points.at(-1)!;
+  const depletionPoint = retirementPoints.find((point) => point.firePortfolio <= 0) ?? null;
+  const retirementSummary = {
+    startAge: profile.retirementAge,
+    startDate: targetPoint.date,
+    firstYearWithdrawal: targetPoint.monthlyWithdrawal * 12,
+    balanceAtRetirement: targetPoint.firePortfolio,
+    endingBalance: endingPoint.firePortfolio,
+    lowestBalance: Math.min(...(retirementPoints.length ? retirementPoints : [targetPoint]).map((point) => point.firePortfolio)),
+    totalWithdrawals: endingPoint.cumulativeWithdrawals,
+    totalWithdrawalShortfall: endingPoint.cumulativeWithdrawalShortfall,
+    depletionPoint,
+  };
   return {
     scenario, profile, accounts, points, fireNumber: effectiveFireNumber(profile), firePoint, targetPoint,
     currentFirePortfolio: current.firePortfolio, currentNetWorth: current.netWorth, currentAccessible: current.accessible,
     plannedPersonalMonthly, plannedEmployerMonthly, requiredPersonalMonthly, requiredContributionScale,
     contributionGap: Number.isFinite(requiredPersonalMonthly) ? requiredPersonalMonthly - plannedPersonalMonthly : Infinity,
+    retirementSummary,
   };
 };
 
@@ -272,9 +328,10 @@ export const emergencyFundMetrics = (cash: number, target: number, monthlySaving
   };
 };
 
-export const isTakeHomeBudgetAccount = (account: Account) =>
-  account.type === 'Roth IRA' || account.type === 'Taxable Brokerage'
-  || account.type === 'HYSA / Cash';
+// Personal contributions to non-payroll accounts are funded from deposited
+// take-home.  401(k) contributions are withheld before the deposited amount
+// reaches the user's bank account, so they are intentionally excluded.
+export const isTakeHomeBudgetAccount = (account: Account) => !account.type.includes('401(k)');
 
 export const scenarioBudgetMetrics = (data: AppData, scenario: Scenario, fireContributionScale = 1, phaseId?: string): ScenarioBudgetMetrics => {
   const { profile, accounts, phases } = applyScenarioOverrides(data, scenario);
@@ -299,8 +356,9 @@ export const scenarioBudgetMetrics = (data: AppData, scenario: Scenario, fireCon
   // shown separately and never deducted from it a second time.
   const takeHomeIncome = data.profile.netMonthlyIncome;
   const incomeBasis = takeHomeIncome + payrollPersonal;
-  // Cash savings are funded from take-home in every contribution phase.
-  // Payroll contributions are already withheld and must not be deducted twice.
+  // Personal contributions to non-payroll accounts are funded from take-home
+  // in every contribution phase. Payroll contributions are already withheld
+  // and must not be deducted twice.
   const takeHomeContributions = rows
     .filter((row) => isTakeHomeBudgetAccount(row.account))
     .reduce((sum, row) => sum + row.personal, 0);

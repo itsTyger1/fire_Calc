@@ -31,8 +31,8 @@ export function CommittedNumberInput({ value, onCommit, min, max, step = 1, aria
   }, [value]);
 
   const commit = () => {
-    const parsed = Number(draft);
-    if (draft.trim() === '' || !Number.isFinite(parsed)) {
+    const parsed = draft.trim() === '' ? 0 : Number(draft);
+    if (!Number.isFinite(parsed)) {
       setDraft(numberText(value));
       return;
     }

@@ -36,9 +36,6 @@ export const defaultData: AppData = {
   scenarios: [
     scenario('base', 'Base FIRE at 50', colors[0], {}),
     scenario('conservative', 'Conservative returns', colors[1], { realReturn: 0.04 }),
-    scenario('higher', 'Higher contributions', colors[2], { contributionScale: 1.2, contributions: { taxable: { personal: 1342 } } }),
-    scenario('lower', 'Lower contributions', colors[3], { contributionScale: 0.72 }),
-    scenario('lifestyle', 'Higher retirement lifestyle', colors[4], { annualSpending: 61250 }),
   ],
   budget: [
     { id: 'housing', name: 'Housing', category: 'Needs', amount: 1935 },

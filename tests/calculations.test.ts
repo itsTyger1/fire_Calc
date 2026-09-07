@@ -43,6 +43,30 @@ describe('financial calculations', () => {
     const points = projectCore({ profile: short, accounts: defaultData.accounts, phases: defaultData.phases });
     expect(points.some((point) => point.phaseName === 'FIRE investing')).toBe(true);
   });
+  it('stops contributions and starts withdrawals at the target retirement age', () => {
+    const retirementProfile = { ...profile, retirementAge: 31, maxAge: 32, annualSpending: 12000, mode: 'real' as const };
+    const zeroReturn = { ...account, balance: 10000, monthlyContribution: 100, employerContribution: 50, annualReturn: 0 };
+    const points = projectCore({ profile: retirementProfile, accounts: [zeroReturn], phases: [], includeRetirement: true });
+
+    expect(points[12].projectionPhase).toBe('retirement');
+    expect(points[12].firePortfolio).toBe(11800);
+    expect(points[12].monthlyWithdrawal).toBe(1000);
+    expect(points[13].firePortfolio).toBe(10800);
+    expect(points[13].personalContributions).toBe(1200);
+    expect(points[13].employerContributions).toBe(600);
+    expect(points[13].cumulativeWithdrawals).toBe(1000);
+    expect(points[24].firePortfolio).toBe(0);
+    expect(points[24].cumulativeWithdrawalShortfall).toBe(200);
+    expect(points[24].investmentGrowth).toBe(0);
+  });
+  it('inflates retirement withdrawals only in nominal mode', () => {
+    const real = projectCore({ profile: { ...profile, retirementAge: 31, maxAge: 31, annualSpending: 12000, mode: 'real' as const }, accounts: [account], phases: [], includeRetirement: true });
+    const nominal = projectCore({ profile: { ...profile, retirementAge: 31, maxAge: 31, annualSpending: 12000, mode: 'nominal' as const, inflationRate: 0.025 }, accounts: [account], phases: [], includeRetirement: true });
+
+    expect(real[12].monthlyWithdrawal).toBe(1000);
+    expect(nominal[12].monthlyWithdrawal).toBeCloseTo(1025);
+    expect(nominal[12].fireTarget).toBeGreaterThan(nominal[0].fireTarget);
+  });
   it('applies scenario overrides without mutating base data', () => {
     const result = applyScenarioOverrides(defaultData, defaultData.scenarios[1]);
     expect(result.profile.realReturn).toBe(0.04);
@@ -154,6 +178,28 @@ describe('financial calculations', () => {
     expect(metrics.payrollPersonal).toBe(900);
     const zeroExpenseScenario = { ...scenario, overrides: { ...scenario.overrides, budgetAmounts: { expenses: 0 } } };
     expect(scenarioBudgetMetrics(exampleData, zeroExpenseScenario, 1, 'phase-fire').remaining).toBe(3950);
+  });
+  it('subtracts personal contributions to every non-payroll account from deposited take-home', () => {
+    const scenario = {
+      ...defaultData.scenarios[0],
+      overrides: {
+        phaseContributions: {
+          'phase-fire': {
+            'roth-ira': { personal: 500 },
+            taxable: { personal: 250 },
+            hysa: { personal: 300 },
+            'trad-ira': { personal: 125 },
+            crypto: { personal: 75 },
+            r401k: { personal: 900 },
+          },
+        },
+      },
+    };
+    const data = { ...defaultData, profile: { ...defaultData.profile, netMonthlyIncome: 5000 }, budget: [{ id: 'expenses', name: 'All expenses', category: 'Needs' as const, amount: 3500 }] };
+    const metrics = scenarioBudgetMetrics(data, scenario, 1, 'phase-fire');
+    expect(metrics.takeHomeContributions).toBe(1250);
+    expect(metrics.remaining).toBe(250);
+    expect(metrics.payrollPersonal).toBe(900);
   });
   it('keeps brokerage cash flow independent of net-worth and FIRE display toggles', () => {
     const data = structuredClone(defaultData);

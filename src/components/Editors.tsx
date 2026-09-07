@@ -1,7 +1,7 @@
 import { useState, type Dispatch, type SetStateAction } from 'react';
 import { ArrowDown, ArrowUp, Plus, Trash2, X } from 'lucide-react';
-import type { Account, AccountType, AppData, AssetClass, Scenario, TaxTreatment, Accessibility } from '../domain/types';
-import { CommittedNumberInput, Field, SelectField, TextField, Toggle, money } from './ui';
+import type { Account, AccountType, AppData, AssetClass, Scenario, ScenarioBudgetMetrics, TaxTreatment, Accessibility } from '../domain/types';
+import { CommittedNumberInput, Field, SelectField, TextField, Toggle, money, percent } from './ui';
 import { applyScenarioOverrides } from '../domain/calculations';
 
 type Setter = Dispatch<SetStateAction<AppData>>;
@@ -11,12 +11,17 @@ const assetClasses: AssetClass[] = ['Broad US equity', 'International equity', '
 export function ProfileEditor({ data, setData, scenario }: { data: AppData; setData: Setter; scenario: Scenario }) {
   const p = applyScenarioOverrides(data, scenario).profile;
   const scenarioKeys = new Set(['currentAge', 'retirementAge', 'annualSpending', 'withdrawalRate', 'customFireNumber', 'realReturn', 'nominalReturn', 'inflationRate']);
+  const updatePlanName = (name: string) => setData((old) => ({
+    ...old,
+    profile: { ...old.profile, name },
+    scenarios: old.scenarios.map((item) => item.id === scenario.id ? { ...item, name } : item),
+  }));
   const update = <K extends keyof AppData['profile']>(key: K, value: AppData['profile'][K]) => setData((old) => scenarioKeys.has(key)
     ? { ...old, scenarios: old.scenarios.map((item) => item.id === scenario.id ? { ...item, overrides: { ...item.overrides, [key]: value } } : item) }
     : { ...old, profile: { ...old.profile, [key]: value } });
   return <div className="editor-stack">
     <div className="editor-grid">
-      <TextField label="Plan name · shared" value={p.name} onChange={(v) => update('name', v)} />
+      <TextField label="Plan name · matches selected scenario" value={scenario.name} onChange={updatePlanName} />
       <Field label="Current age" value={p.currentAge} min={1} step={0.1} onChange={(v) => update('currentAge', v)} error={p.currentAge <= 0 ? 'Enter an age above zero.' : undefined} />
       <Field label="Target retirement age" value={p.retirementAge} min={p.currentAge + .1} step={0.1} onChange={(v) => update('retirementAge', v)} error={p.retirementAge <= p.currentAge ? 'Must be after your current age.' : undefined} />
       <Field label="Maximum projection age · shared" value={p.maxAge} min={p.retirementAge + .1} step={1} onChange={(v) => update('maxAge', v)} error={p.maxAge <= p.retirementAge ? 'Must be after retirement age.' : undefined} />
@@ -80,7 +85,7 @@ export function AccountsEditor({ data, setData }: { data: AppData; setData: Sett
   </div>;
 }
 
-export function BudgetEditor({ data, setData, scenario }: { data: AppData; setData: Setter; scenario: Scenario }) {
+export function BudgetEditor({ data, setData, scenario, budget }: { data: AppData; setData: Setter; scenario: Scenario; budget: ScenarioBudgetMetrics }) {
   const p = data.profile;
   const updateProfile = <K extends keyof typeof p>(key: K, value: typeof p[K]) => setData((old) => ({ ...old, profile: { ...old.profile, [key]: value } }));
   const updateScenarioAmount = (itemId: string, amount: number) => setData((old) => ({
@@ -99,11 +104,18 @@ export function BudgetEditor({ data, setData, scenario }: { data: AppData; setDa
       return { ...item, overrides: { ...item.overrides, budgetAmounts } };
     }),
   }));
+  const ratioBase = budget.takeHomeIncome > 0 ? budget.takeHomeIncome : 0;
+  const ratio = (amount: number) => ratioBase > 0 ? amount / ratioBase : 0;
+  const budgetRatios = [
+    { label: 'Needs', amount: budget.needs },
+    { label: 'Wants', amount: budget.wants },
+    { label: 'Savings & investments', amount: budget.takeHomeContributions },
+  ];
   return <div className="editor-stack">
     <div className="editor-grid"><Field label="Deposited take-home · shared" value={p.netMonthlyIncome} prefix="$" min={0} onChange={(v) => updateProfile('netMonthlyIncome', v)} hint="The amount that actually reaches your bank account after payroll deductions." /></div>
     <p className="scenario-budget-note">Expense amounts apply to this scenario. Names and categories are shared.</p>
     <div className="budget-items">{data.budget.map((item) => { const amount = scenario.overrides.budgetAmounts?.[item.id] ?? item.amount; return <div className="budget-row" key={item.id}><input aria-label={`${item.name} expense name`} value={item.name} onChange={(e) => setData((old) => ({ ...old, budget: old.budget.map((b) => b.id === item.id ? { ...b, name: e.target.value } : b) }))} /><select aria-label={`${item.name} category`} value={item.category} onChange={(e) => setData((old) => ({ ...old, budget: old.budget.map((b) => b.id === item.id ? { ...b, category: e.target.value as 'Needs' | 'Wants' } : b) }))}><option>Needs</option><option>Wants</option></select><span className="mini-money">$<CommittedNumberInput ariaLabel={`${item.name} monthly expense`} min={0} value={amount} onCommit={(value) => updateScenarioAmount(item.id, value)} /></span><button className="icon-button danger" onClick={() => removeBudgetItem(item.id)}><Trash2 size={15} /></button></div>; })}</div>
     <button className="add-card" onClick={() => setData((old) => ({ ...old, budget: [...old.budget, { id: crypto.randomUUID(), name: 'New expense', category: 'Needs', amount: 0 }] }))}><Plus size={18} /> Add budget item</button>
-    <details className="advanced-inputs"><summary>Optional budget reference markers · shared</summary><div className="ratio-target"><span>Custom budget target</span>{(['needs', 'wants', 'wealth'] as const).map((key) => <Field key={key} label={key[0].toUpperCase() + key.slice(1)} value={p.budgetTargets[key] * 100} suffix="%" min={0} max={100} onChange={(v) => updateProfile('budgetTargets', { ...p.budgetTargets, [key]: v / 100 })} />)}</div></details>
+    <div className="budget-ratios" aria-label="Budget ratios"><div className="budget-ratios-heading"><strong>Budget ratios</strong><span>Calculated from deposited take-home · read-only</span></div>{budgetRatios.map(({ label, amount }) => <div className="budget-ratio" key={label}><span>{label}</span><strong>{percent(ratio(amount))}</strong><small>{money(amount)} / month</small></div>)}</div>
   </div>;
 }

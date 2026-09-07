@@ -116,6 +116,8 @@ export interface AppData {
   budget: BudgetItem[];
 }
 
+export type ProjectionPhase = 'accumulation' | 'retirement';
+
 export interface ProjectionPoint {
   month: number;
   age: number;
@@ -131,6 +133,22 @@ export interface ProjectionPoint {
   investmentGrowth: number;
   balances: Record<string, number>;
   phaseName: string;
+  projectionPhase: ProjectionPhase;
+  monthlyWithdrawal: number;
+  cumulativeWithdrawals: number;
+  cumulativeWithdrawalShortfall: number;
+}
+
+export interface RetirementSummary {
+  startAge: number;
+  startDate: string;
+  firstYearWithdrawal: number;
+  balanceAtRetirement: number;
+  endingBalance: number;
+  lowestBalance: number;
+  totalWithdrawals: number;
+  totalWithdrawalShortfall: number;
+  depletionPoint: ProjectionPoint | null;
 }
 
 export interface ScenarioResult {
@@ -149,4 +167,5 @@ export interface ScenarioResult {
   requiredPersonalMonthly: number;
   requiredContributionScale: number;
   contributionGap: number;
+  retirementSummary: RetirementSummary;
 }
