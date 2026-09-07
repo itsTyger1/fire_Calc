@@ -8,11 +8,15 @@ import { InputHub } from './components/InputHub';
 import { BudgetSummary } from './components/BudgetSummary';
 import { Analytics, BridgeAndEmergency, monthStatus, Sensitivity, SummaryTable, TimelineChart } from './components/Results';
 import { age, Metric, money, percent, Section } from './components/ui';
+type UpdateCheck = { currentVersion: string; latestVersion?: string; updateAvailable: boolean; downloadUrl?: string | null; releaseUrl?: string; noPublishedRelease?: boolean };
+declare global { interface Window { fireUpdater?: { check: () => Promise<UpdateCheck>; install: (downloadUrl: string) => Promise<{ started: boolean }> } } }
 const clone = <T,>(value: T): T => structuredClone(value);
 export default function App() {
   const [data, setData] = useState<AppData>(() => loadData());
   const [selected, setSelected] = useState(() => data.scenarios[0]?.id ?? '');
   const [toast, setToast] = useState<string | null>(null);
+  const [update, setUpdate] = useState<UpdateCheck | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [requestedPhaseId, setPhaseId] = useState<string>();
   const importRef = useRef<HTMLInputElement>(null);
   // Keep controlled inputs responsive while projection and chart updates are
@@ -37,12 +41,25 @@ export default function App() {
 
   const handleImport = async (file?: File) => { if (!file) return; try { const next = await readImport(file); setData(next); setSelected(next.scenarios[0]?.id ?? ''); setToast('Plan imported successfully'); } catch (error) { setToast(error instanceof Error ? error.message : 'Import failed'); } };
   const handleReset = () => { if (!window.confirm('Reset the entire planner to its seeded defaults?')) return; const next = resetData(); setData(next); setSelected(next.scenarios[0].id); setToast('Planner reset'); };
+  const handleRefresh = () => window.location.reload();
+  const handleUpdate = async () => {
+    if (!window.fireUpdater) { setToast('Updates are available in the desktop app'); return; }
+    setCheckingUpdate(true);
+    try {
+      const result = await window.fireUpdater.check(); setUpdate(result);
+      if (result.noPublishedRelease) setToast('No published update is available yet');
+      else if (!result.updateAvailable) setToast(`You’re up to date (${result.currentVersion})`);
+      else if (!result.downloadUrl) setToast(`Version ${result.latestVersion} is available, but no installer was published`);
+    } catch (error) { setToast(error instanceof Error ? error.message : 'Could not check for updates'); }
+    finally { setCheckingUpdate(false); }
+  };
+  const installUpdate = async () => { if (!update?.downloadUrl || !window.fireUpdater) return; setToast('Downloading update…'); try { await window.fireUpdater.install(update.downloadUrl); } catch (error) { setToast(error instanceof Error ? error.message : 'Update failed'); } };
   if (!base || !selectedScenario || !selectedBudget) return <main className="fatal"><Flame /><h1>No scenarios found</h1><button className="button primary" onClick={() => setData(clone(defaultData))}>Restore defaults</button></main>;
   const delta = base.targetPoint.firePortfolio - base.targetPoint.fireTarget;
   const fireProgress = base.currentFirePortfolio / Math.max(1, base.fireNumber);
   const contributionDifference = base.plannedPersonalMonthly - base.requiredPersonalMonthly;
   return <div className="app-shell">
-    <header className="topbar"><div className="brand"><span><Flame size={19} /></span><div><strong>FIRE Projector</strong><small>{data.profile.mode === 'real' ? 'Today’s dollars' : 'Future nominal dollars'}</small></div></div><div className="top-actions"><button className="button ghost" onClick={() => { saveData(data); setToast('Saved locally'); }}><Save size={16} /> <span>Save</span></button><button className="button ghost" onClick={() => downloadData(data)}><Download size={16} /> <span>Export</span></button><button className="button ghost" onClick={() => importRef.current?.click()}><Upload size={16} /> <span>Import</span></button><button className="button ghost" onClick={handleReset}><RefreshCcw size={16} /> <span>Reset</span></button><input ref={importRef} type="file" accept="application/json" hidden onChange={(e) => void handleImport(e.target.files?.[0])} /></div></header>
+    <header className="topbar"><div className="brand"><span><Flame size={19} /></span><div><strong>FIRE Projector</strong><small>{data.profile.mode === 'real' ? 'Today’s dollars' : 'Future nominal dollars'}</small></div></div><div className="top-actions"><button className="button ghost" onClick={() => { saveData(data); setToast('Saved locally'); }}><Save size={16} /> <span>Save</span></button><button className="button ghost" onClick={() => downloadData(data)}><Download size={16} /> <span>Export</span></button><button className="button ghost" onClick={() => importRef.current?.click()}><Upload size={16} /> <span>Import</span></button><button className="button ghost" onClick={handleReset}><RefreshCcw size={16} /> <span>Reset</span></button><button className="button ghost" onClick={handleRefresh}><RefreshCcw size={16} /> <span>Refresh app</span></button><button className="button ghost" onClick={update?.updateAvailable && update.downloadUrl ? installUpdate : handleUpdate} disabled={checkingUpdate}><RefreshCcw size={16} /> <span>{checkingUpdate ? 'Checking…' : update?.updateAvailable && update.downloadUrl ? `Update ${update.latestVersion}` : 'Check updates'}</span></button><input ref={importRef} type="file" accept="application/json" hidden onChange={(e) => void handleImport(e.target.files?.[0])} /></div></header>
 
     <main className="workspace">
       <InputHub data={data} setData={setData} scenario={selectedScenario} setSelected={setSelected} phaseId={fireInvestingPhaseId} setPhaseId={setPhaseId} />
