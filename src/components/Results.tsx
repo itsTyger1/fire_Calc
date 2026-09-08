@@ -17,6 +17,24 @@ export const monthStatus = (result: ScenarioResult) => {
 
 interface ChartDatum { month: number; age: number; year: number; date: string; [key: string]: number | string }
 interface TimelineTooltipItem { dataKey?: string | number; value?: number | string; color?: string; payload?: ChartDatum }
+interface AccountTooltipItem { dataKey?: string | number; name?: string | number; value?: number | string; color?: string; stroke?: string }
+
+const accountTooltip = ({ active, payload, label }: { active?: boolean; payload?: ReadonlyArray<AccountTooltipItem>; label?: number | string }) => {
+  const items = payload?.filter((item) => item.value != null) ?? [];
+  if (!active || !items.length) return null;
+  const numericLabel = Number(label);
+  return <div className="chart-tooltip account-chart-tooltip">
+    <div className="tooltip-heading">
+      <strong>Age {Number.isFinite(numericLabel) ? numericLabel.toFixed(0) : '—'}</strong>
+    </div>
+    <div className="account-tooltip-items">
+      {items.map((item) => <div className="account-tooltip-item" key={String(item.dataKey ?? item.name)}>
+        <span className="account-tooltip-name"><i style={{ background: item.color ?? item.stroke ?? '#9fb4ba' }} />{item.name ?? item.dataKey}</span>
+        <strong>{money(Number(item.value ?? 0))}</strong>
+      </div>)}
+    </div>
+  </div>;
+};
 
 export function TimelineChart({ results, selected, onSelect }: { results: ScenarioResult[]; selected: string; onSelect: (id: string) => void }) {
   const [axis, setAxis] = useState<'age' | 'year'>('age');
@@ -42,7 +60,6 @@ export function TimelineChart({ results, selected, onSelect }: { results: Scenar
     }
     return rows;
   }, [first, maxMonth, visible.map((r) => r.scenario.id + r.points.length).join('|')]);
-
   const tooltip = ({ active, payload, label }: { active?: boolean; payload?: ReadonlyArray<TimelineTooltipItem>; label?: number | string }) => {
     const portfolioPayload = payload?.filter((item) => visible.some((result) => result.scenario.id === String(item.dataKey))) ?? [];
     if (!active || !portfolioPayload.length) return null;
@@ -84,6 +101,7 @@ export function TimelineChart({ results, selected, onSelect }: { results: Scenar
 
   if (!first || !visible.length) return <div className="empty-chart">Show at least one scenario to draw the timeline.</div>;
   return <>
+    <p className="chart-phase-note muted">This projection uses every contribution phase in sequence, including emergency-fund saving before FIRE investing. The emergency phase ends when its cash target is reached.</p>
     <div className="chart-controls"><div className="segmented"><button className={axis === 'age' ? 'active' : ''} onClick={() => setAxis('age')}>Age</button><button className={axis === 'year' ? 'active' : ''} onClick={() => setAxis('year')}>Calendar year</button></div><select value={range} onChange={(e) => setRange(e.target.value as typeof range)}><option value="target">Through target age</option><option value="70">Through age 70</option><option value="max">Full projection</option></select></div>
     <div className="main-chart"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={chartData} margin={{ top: 16, right: 18, bottom: 6, left: 4 }}>
       <defs>{visible.map((r) => <filter key={r.scenario.id} id={`glow-${r.scenario.id}`}><feGaussianBlur stdDeviation="2" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>)}</defs>
@@ -160,7 +178,7 @@ export function Analytics({ result, data }: { result: ScenarioResult; data: AppD
     </Section>
     <Section title="Account balances over time" eyebrow="Selected scenario · independent balances" className="wide-panel">
       <div className="account-chart-note"><span>Each line is one account—not a cumulative stack.</span><span>Contributions before retirement · withdrawals after</span></div>
-      <div className="account-chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={accountData} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}><CartesianGrid vertical={false} stroke="#193642" /><XAxis dataKey="age" tickFormatter={(v) => Number(v).toFixed(0)} stroke="#78909a" axisLine={false} tickLine={false} /><YAxis tickFormatter={(v) => money(v, true)} stroke="#78909a" width={58} axisLine={false} tickLine={false} /><Tooltip formatter={(v) => money(Number(v))} labelFormatter={(v) => `Age ${Number(v).toFixed(0)}`} />{result.accounts.map((account, i) => <Line key={account.id} type="monotone" dataKey={account.id} name={account.name} stroke={scenarioColors[i % scenarioColors.length]} strokeWidth={2.2} dot={false} activeDot={{ r: 4 }} />)}</LineChart></ResponsiveContainer></div>
+      <div className="account-chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={accountData} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}><CartesianGrid vertical={false} stroke="#193642" /><XAxis dataKey="age" tickFormatter={(v) => Number(v).toFixed(0)} stroke="#78909a" axisLine={false} tickLine={false} /><YAxis tickFormatter={(v) => money(v, true)} stroke="#78909a" width={58} axisLine={false} tickLine={false} /><Tooltip content={accountTooltip as never} allowEscapeViewBox={{ x: false, y: false }} />{result.accounts.map((account, i) => <Line key={account.id} type="monotone" dataKey={account.id} name={account.name} stroke={scenarioColors[i % scenarioColors.length]} strokeWidth={2.2} dot={false} activeDot={{ r: 4 }} />)}</LineChart></ResponsiveContainer></div>
     </Section>
   </div>;
 }
@@ -177,7 +195,7 @@ export function BridgeAndEmergency({ result, data }: { result: ScenarioResult; d
   const cashSavings = cashAccount ? (phase?.contributions[cashAccount.id]?.personal ?? cashAccount.monthlyContribution) : 0;
   const emergency = emergencyFundMetrics(cashAccount?.balance ?? 0, result.profile.emergencyTarget, cashSavings, data.profile.normalMonthlySpending, data.profile.jobLossMonthlySpending);
   return <div className="bridge-grid">
-    <Section title="Early retirement bridge" eyebrow="Access before 59½"><div className="bridge-callout"><div className={`bridge-ring ${accessible >= bridgeNeed ? 'good' : 'warn'}`}><strong>{percent(Math.min(1, accessible / Math.max(1, bridgeNeed)), 0)}</strong><small>funded</small></div><div><h3>{accessible >= bridgeNeed ? 'Your estimated bridge is covered' : `${money(bridgeNeed - accessible)} bridge gap`}</h3><p>{money(accessible)} accessible against an estimated {money(bridgeNeed)} needed for {bridgeYears.toFixed(1)} years.</p></div></div><div className="mini-metrics"><div><span>Accessible at FIRE</span><strong>{money(accessible)}</strong></div><div><span>Annual spending</span><strong>{money(result.profile.annualSpending)}</strong></div><div><span>Bridge years</span><strong>{bridgeYears.toFixed(1)}</strong></div></div><p className="fine-print">Planning estimate only. “Potentially accessible” includes your entered Roth IRA contribution basis plus projected personal Roth IRA contributions; tax and withdrawal rules may change.</p></Section>
+    <Section title="Early retirement bridge" eyebrow="Access before 59½"><div className="bridge-callout"><div className={`bridge-ring ${accessible >= bridgeNeed ? 'good' : 'warn'}`}><strong>{percent(Math.min(1, accessible / Math.max(1, bridgeNeed)), 0)}</strong><small>funded</small></div><div><h3>{accessible >= bridgeNeed ? 'Your estimated bridge is covered' : `${money(bridgeNeed - accessible)} bridge gap`}</h3><p>{money(accessible)} accessible against an estimated {money(bridgeNeed)} needed for {bridgeYears.toFixed(1)} years.</p></div></div><div className="mini-metrics"><div><span>Accessible at FIRE</span><strong>{money(accessible)}</strong></div><div><span>Annual spending</span><strong>{money(result.profile.annualSpending)}</strong></div><div><span>Bridge years</span><strong>{bridgeYears.toFixed(1)}</strong></div></div><p className="fine-print">How it’s calculated: immediate-access account balances, plus the lesser of your non-immediate Roth IRA balance and your Roth IRA contribution basis (including projected personal contributions). Traditional IRA and 401(k) balances are excluded because they generally have access restrictions before 59½. This is a planning estimate; tax and withdrawal rules may change.</p></Section>
     <Section title="Emergency fund" eyebrow="Cash runway"><p className="muted">Cash target: {money(result.profile.emergencyTarget)} · Normal spending: {money(data.profile.normalMonthlySpending)}/mo · Job-loss spending: {money(data.profile.jobLossMonthlySpending)}/mo</p><div className="mini-metrics"><div><span>Normal runway</span><strong>{emergency.normalRunway.toFixed(1)} mo</strong></div><div><span>Job-loss runway</span><strong>{emergency.jobLossRunway.toFixed(1)} mo</strong></div><div><span>Target ETA</span><strong>{Number.isFinite(emergency.monthsToTarget) ? `${emergency.monthsToTarget} mo` : 'No savings'}</strong></div></div><div className="progress"><span style={{ width: `${Math.min(100, (cashAccount?.balance ?? 0) / Math.max(1, result.profile.emergencyTarget) * 100)}%` }} /></div><small className="muted">{money(emergency.remaining)} remaining · {money(cashSavings)}/mo current cash savings</small></Section>
   </div>;
 }

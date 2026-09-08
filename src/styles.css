@@ -165,6 +165,8 @@ h1, h2, h3, p { margin-top: 0; }
 .panel-note { display: flex; gap: 6px; align-items: center; color: #718b94; font-size: 11px; }
 .panel-note svg { color: var(--green); }
 
+.chart-phase-note { margin: 0; padding: 0 22px 2px; font-size: 10px; }
+
 .chart-controls { padding: 10px 22px 0; display: flex; align-items: center; justify-content: space-between; }
 .segmented { padding: 3px; background: #071c24; border-radius: 8px; display: flex; }
 .segmented button { border: 0; background: transparent; color: #78909a; border-radius: 6px; padding: 6px 10px; font-size: 10px; font-weight: 700; cursor: pointer; }
@@ -179,6 +181,18 @@ h1, h2, h3, p { margin-top: 0; }
 .chart-key .dot-key { width: 7px; height: 7px; background: var(--green); border: 0; border-radius: 50%; }
 .main-chart .recharts-tooltip-wrapper { max-width: calc(100% - 12px); max-height: calc(100% - 12px); }
 .chart-tooltip { width: min(300px, calc(100vw - 32px)); max-width: 100%; max-height: 100%; overflow: auto; overscroll-behavior: contain; padding: 10px 12px; color: #e8f1f3; background: rgba(5, 20, 27, .98); border: 1px solid #41616b; border-radius: 11px; box-shadow: 0 16px 40px rgba(0,0,0,.48); }
+.account-chart-tooltip { width: min(240px, calc(100vw - 32px)); }
+.account-tooltip-items { display: grid; gap: 5px; }
+.account-tooltip-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+.account-tooltip-name { min-width: 0; display: flex; align-items: center; gap: 7px; color: #b9cbd0; font-size: 10px; }
+.account-tooltip-name i { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; }
+.account-tooltip-item strong { color: #e8f1f3; font-size: 10px; text-align: right; }
+.recharts-default-tooltip { min-width: 145px; padding: 9px 11px !important; color: #d7e5e8 !important; background: rgba(5, 20, 27, .98) !important; border: 1px solid #41616b !important; border-radius: 9px !important; box-shadow: 0 14px 35px rgba(0,0,0,.45) !important; }
+.recharts-tooltip-label { margin-bottom: 6px !important; color: #f3fbfc !important; font-size: 10px !important; }
+.recharts-tooltip-item-list { margin: 0 !important; }
+.recharts-tooltip-item { padding: 2px 0 !important; color: #c2d2d6 !important; font-size: 10px !important; }
+.recharts-tooltip-item-name, .recharts-tooltip-item-separator { color: #9fb4ba !important; }
+.recharts-tooltip-item-value, .recharts-tooltip-item-unit { color: #e8f1f3 !important; }
 .tooltip-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding-bottom: 7px; }
 .tooltip-heading strong { color: #f3fbfc; font-size: 12.5px; }
 .tooltip-heading span { color: #9bb1b8; font-size: 10px; white-space: nowrap; }

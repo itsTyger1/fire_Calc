@@ -37,6 +37,7 @@ export interface ContributionPhase {
   name: string;
   startsWhen: PhaseTrigger;
   contributions: Record<string, ContributionAmount>;
+  takeHomeIncome?: number;
 }
 
 export interface BudgetItem { id: string; name: string; category: 'Needs' | 'Wants'; amount: number }

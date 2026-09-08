@@ -361,7 +361,7 @@ export const scenarioBudgetMetrics = (data: AppData, scenario: Scenario, fireCon
   const cashSavings = rows.filter((row) => row.account.type === 'HYSA / Cash').reduce((sum, row) => sum + row.personal, 0);
   // Deposited take-home is the user's stated cash available. Payroll retirement is
   // shown separately and never deducted from it a second time.
-  const takeHomeIncome = data.profile.netMonthlyIncome;
+  const takeHomeIncome = phase?.takeHomeIncome ?? data.profile.netMonthlyIncome;
   const incomeBasis = takeHomeIncome + payrollPersonal;
   // Personal contributions to non-payroll accounts are funded from take-home
   // in every contribution phase. Payroll contributions are already withheld

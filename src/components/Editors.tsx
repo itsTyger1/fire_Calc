@@ -97,8 +97,10 @@ export function AccountsEditor({ data, setData }: { data: AppData; setData: Sett
 }
 
 export function BudgetEditor({ data, setData, scenario, budget }: { data: AppData; setData: Setter; scenario: Scenario; budget: ScenarioBudgetMetrics }) {
-  const p = data.profile;
-  const updateProfile = <K extends keyof typeof p>(key: K, value: typeof p[K]) => setData((old) => ({ ...old, profile: { ...old.profile, [key]: value } }));
+  const updatePhaseIncome = (takeHomeIncome: number) => setData((old) => ({
+    ...old,
+    phases: old.phases.map((phase) => phase.id === budget.phase.id ? { ...phase, takeHomeIncome } : phase),
+  }));
   const updateScenarioAmount = (itemId: string, amount: number) => setData((old) => ({
     ...old,
     scenarios: old.scenarios.map((item) => item.id === scenario.id ? {
@@ -123,7 +125,7 @@ export function BudgetEditor({ data, setData, scenario, budget }: { data: AppDat
     { label: 'Savings & investments', amount: budget.takeHomeContributions },
   ];
   return <div className="editor-stack">
-    <div className="editor-grid"><Field label="Deposited take-home · shared" value={p.netMonthlyIncome} prefix="$" min={0} onChange={(v) => updateProfile('netMonthlyIncome', v)} hint="The amount that actually reaches your bank account after payroll deductions." /></div>
+    <div className="editor-grid"><Field label={`Deposited take-home · ${budget.phase.name}`} value={budget.takeHomeIncome} prefix="$" min={0} onChange={updatePhaseIncome} hint="The amount that reaches your bank account after payroll deductions during the selected contribution phase. Each phase saves its own amount." /></div>
     <p className="scenario-budget-note">Expense amounts apply to this scenario. Names and categories are shared.</p>
     <div className="budget-items">{data.budget.map((item) => { const amount = scenario.overrides.budgetAmounts?.[item.id] ?? item.amount; return <div className="budget-row" key={item.id}><input aria-label={`${item.name} expense name`} value={item.name} onChange={(e) => setData((old) => ({ ...old, budget: old.budget.map((b) => b.id === item.id ? { ...b, name: e.target.value } : b) }))} /><select aria-label={`${item.name} category`} value={item.category} onChange={(e) => setData((old) => ({ ...old, budget: old.budget.map((b) => b.id === item.id ? { ...b, category: e.target.value as 'Needs' | 'Wants' } : b) }))}><option>Needs</option><option>Wants</option></select><span className="mini-money">$<CommittedNumberInput ariaLabel={`${item.name} monthly expense`} min={0} value={amount} onCommit={(value) => updateScenarioAmount(item.id, value)} /></span><button className="icon-button danger" onClick={() => removeBudgetItem(item.id)}><Trash2 size={15} /></button></div>; })}</div>
     <button className="add-card" onClick={() => setData((old) => ({ ...old, budget: [...old.budget, { id: crypto.randomUUID(), name: 'New expense', category: 'Needs', amount: 0 }] }))}><Plus size={18} /> Add budget item</button>

@@ -151,6 +151,13 @@ describe('financial calculations', () => {
     expect(metrics.cashSavings).toBe(250);
     expect(metrics.remaining).toBe(522);
   });
+  it('uses the deposited take-home amount saved on the selected contribution phase', () => {
+    const data = structuredClone(defaultData);
+    data.phases.find((phase) => phase.id === 'phase-emergency')!.takeHomeIncome = 5000;
+    data.phases.find((phase) => phase.id === 'phase-fire')!.takeHomeIncome = 7000;
+    expect(scenarioBudgetMetrics(data, data.scenarios[0], 1, 'phase-emergency').takeHomeIncome).toBe(5000);
+    expect(scenarioBudgetMetrics(data, data.scenarios[0], 1, 'phase-fire').takeHomeIncome).toBe(7000);
+  });
   it('accounts for every take-home dollar in every FIRE-phase scenario', () => {
     defaultData.scenarios.forEach((scenario) => {
       const metrics = scenarioBudgetMetrics(defaultData, scenario, 1, 'phase-fire');
