@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, shell, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, Menu, shell, ipcMain } = require('electron');
 const https = require('node:https');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -101,8 +101,6 @@ ipcMain.handle('download-and-install-update', async (_event, downloadUrl) => {
   if (typeof downloadUrl !== 'string' || !downloadUrl.startsWith('https://github.com/')) throw new Error('Invalid update download URL');
   const destination = path.join(os.tmpdir(), `FIRE-Projector-update-${Date.now()}.exe`);
   await downloadFile(downloadUrl, destination);
-  const result = await dialog.showMessageBox({ type: 'info', buttons: ['Install update', 'Cancel'], defaultId: 0, cancelId: 1, title: 'FIRE Projector update ready', message: 'The update has downloaded. Install it now?' });
-  if (result.response !== 0) return { started: false };
   spawn(destination, [], { detached: true, stdio: 'ignore' }).unref();
   app.quit();
   return { started: true };

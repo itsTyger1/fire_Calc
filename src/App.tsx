@@ -17,6 +17,8 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [update, setUpdate] = useState<UpdateCheck | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [installingUpdate, setInstallingUpdate] = useState(false);
+  const [updatePromptOpen, setUpdatePromptOpen] = useState(false);
   const [requestedPhaseId, setPhaseId] = useState<string>();
   const importRef = useRef<HTMLInputElement>(null);
   // Keep controlled inputs responsive while projection and chart updates are
@@ -43,17 +45,32 @@ export default function App() {
   const handleReset = () => { if (!window.confirm('Are you sure you want to reset the entire planner to its seeded defaults?')) return; const next = resetData(); setData(next); setSelected(next.scenarios[0].id); setToast('Planner reset'); };
   const handleRefresh = () => window.location.reload();
   const handleUpdate = async () => {
-    if (!window.fireUpdater) { setToast('Updates are available in the desktop app'); return; }
+    setUpdate(null);
+    setUpdatePromptOpen(false);
+    if (!window.fireUpdater) { setToast('Update checks are available in the desktop app'); return; }
     setCheckingUpdate(true);
     try {
-      const result = await window.fireUpdater.check(); setUpdate(result);
+      const result = await window.fireUpdater.check();
+      setUpdate(result);
       if (result.noPublishedRelease) setToast('No published update is available yet');
       else if (!result.updateAvailable) setToast(`You’re up to date (${result.currentVersion})`);
       else if (!result.downloadUrl) setToast(`Version ${result.latestVersion} is available, but no installer was published`);
+      else setUpdatePromptOpen(true);
     } catch (error) { setToast(error instanceof Error ? error.message : 'Could not check for updates'); }
     finally { setCheckingUpdate(false); }
   };
-  const installUpdate = async () => { if (!update?.downloadUrl || !window.fireUpdater) return; setToast('Downloading update…'); try { await window.fireUpdater.install(update.downloadUrl); } catch (error) { setToast(error instanceof Error ? error.message : 'Update failed'); } };
+  const installUpdate = async () => {
+    const downloadUrl = update?.downloadUrl;
+    if (!downloadUrl || !window.fireUpdater) return;
+    setUpdatePromptOpen(false);
+    setInstallingUpdate(true);
+    setToast('Downloading update…');
+    try {
+      const result = await window.fireUpdater.install(downloadUrl);
+      if (!result.started) setToast('Update canceled');
+    } catch (error) { setToast(error instanceof Error ? error.message : 'Update failed'); }
+    finally { setInstallingUpdate(false); }
+  };
   if (!base || !selectedScenario || !selectedBudget) return <main className="fatal"><Flame /><h1>No scenarios found</h1><button className="button primary" onClick={() => setData(clone(defaultData))}>Restore defaults</button></main>;
   const delta = base.targetPoint.firePortfolio - base.targetPoint.fireTarget;
   const fireProgress = base.currentFirePortfolio / Math.max(1, base.fireNumber);
@@ -70,7 +87,7 @@ export default function App() {
         ? `${money(contributionDifference)}/mo above amount needed`
         : `${money(-contributionDifference)}/mo more needed`;
   return <div className="app-shell">
-    <header className="topbar"><div className="brand"><span><Flame size={19} /></span><div><strong>FIRE Projector</strong><small>{data.profile.mode === 'real' ? 'Today’s dollars' : 'Future nominal dollars'}</small></div></div><div className="top-actions"><button className="button ghost" onClick={() => downloadData(data)}><Download size={16} /> <span>Export</span></button><button className="button ghost" onClick={() => importRef.current?.click()}><Upload size={16} /> <span>Import</span></button><button className="button ghost" onClick={handleRefresh}><RefreshCcw size={16} /> <span>Refresh app</span></button><button className="button ghost" onClick={update?.updateAvailable && update.downloadUrl ? installUpdate : handleUpdate} disabled={checkingUpdate}><RefreshCcw size={16} /> <span>{checkingUpdate ? 'Checking…' : update?.updateAvailable && update.downloadUrl ? `Update ${update.latestVersion}` : 'Check updates'}</span></button><button className="button danger" onClick={handleReset}><RefreshCcw size={16} /> <span>Reset</span></button><input ref={importRef} type="file" accept="application/json" hidden onChange={(e) => void handleImport(e.target.files?.[0])} /></div></header>
+    <header className="topbar"><div className="brand"><span><Flame size={19} /></span><div><strong>FIRE Projector</strong><small>{data.profile.mode === 'real' ? 'Today’s dollars' : 'Future nominal dollars'}</small></div></div><div className="top-actions"><button className="button ghost" onClick={() => downloadData(data)}><Download size={16} /> <span>Export</span></button><button className="button ghost" onClick={() => importRef.current?.click()}><Upload size={16} /> <span>Import</span></button><button className="button ghost" onClick={handleRefresh}><RefreshCcw size={16} /> <span>Refresh app</span></button><button className="button ghost" onClick={handleUpdate} disabled={checkingUpdate || installingUpdate}><RefreshCcw size={16} /> <span>{checkingUpdate ? 'Checking…' : installingUpdate ? 'Downloading…' : 'Check updates'}</span></button><button className="button danger" onClick={handleReset}><RefreshCcw size={16} /> <span>Reset</span></button><input ref={importRef} type="file" accept="application/json" hidden onChange={(e) => void handleImport(e.target.files?.[0])} /></div></header>
 
     <main className="workspace">
       <InputHub data={data} setData={setData} scenario={selectedScenario} setSelected={setSelected} phaseId={fireInvestingPhaseId} setPhaseId={setPhaseId} />
@@ -102,6 +119,14 @@ export default function App() {
       </div>
       <footer><div><Landmark size={18} /><strong>Private by design</strong><span>Your plan is saved on this computer. No login or backend.</span></div><p>This tool is for planning and educational purposes. Investment returns, inflation, tax laws, withdrawal rules, and future expenses are uncertain. Projections are estimates, not guarantees or individualized tax/legal advice.</p></footer>
     </main>
+    {updatePromptOpen && update?.updateAvailable && update.latestVersion && update.downloadUrl && <div className="update-modal-backdrop" role="presentation" onMouseDown={() => setUpdatePromptOpen(false)}>
+      <div className="update-modal" role="dialog" aria-modal="true" aria-labelledby="update-modal-title" onMouseDown={(event) => event.stopPropagation()}>
+        <span className="eyebrow">Update available</span>
+        <h2 id="update-modal-title">FIRE Projector {update.latestVersion} is ready</h2>
+        <p>You’re running version {update.currentVersion}. Download and install the newer version now?</p>
+        <div className="update-modal-actions"><button className="button secondary" onClick={() => setUpdatePromptOpen(false)}>Not now</button><button className="button primary" onClick={() => void installUpdate()} disabled={installingUpdate}>{installingUpdate ? 'Downloading…' : 'Update now'}</button></div>
+      </div>
+    </div>}
     {toast && <div className="toast"><Check size={16} />{toast}</div>}
   </div>;
 }

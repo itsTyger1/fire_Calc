@@ -90,7 +90,7 @@ export function TimelineChart({ results, selected, onSelect }: { results: Scenar
       <CartesianGrid vertical={false} stroke="#193642" strokeDasharray="4 5" />
       <XAxis dataKey={axis} type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => axis === 'age' ? Number(v).toFixed(0) : String(Math.floor(v))} stroke="#78909a" tickLine={false} axisLine={false} />
       <YAxis tickFormatter={(v) => money(v, true)} stroke="#78909a" tickLine={false} axisLine={false} width={64} />
-      <Tooltip content={tooltip as never} />
+      <Tooltip content={tooltip as never} allowEscapeViewBox={{ x: false, y: false }} wrapperStyle={{ maxWidth: 'calc(100% - 12px)', maxHeight: 'calc(100% - 12px)' }} />
       <Legend formatter={(id) => visible.find((r) => r.scenario.id === id)?.scenario.name ?? id} onClick={(item) => onSelect(String(item.dataKey))} />
       {visible.map((result, index) => <Line key={`target-${result.scenario.id}`} dataKey={`${result.scenario.id}__target`} stroke={result.scenario.color} strokeWidth={1.4} strokeDasharray={`${3 + index} 6`} strokeOpacity={0.35} dot={false} activeDot={false} legendType="none" />)}
       {visible.map((result) => {
