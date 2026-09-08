@@ -35,7 +35,7 @@ export const defaultData: AppData = {
   phases: defaultPhases,
   scenarios: [
     scenario('base', 'Base FIRE at 50', colors[0], {}),
-    scenario('conservative', 'Conservative returns', colors[1], { realReturn: 0.04 }),
+    scenario('conservative', 'Conservative returns', colors[1], { nominalReturn: 0.066 }),
   ],
   budget: [
     { id: 'housing', name: 'Housing', category: 'Needs', amount: 1935 },

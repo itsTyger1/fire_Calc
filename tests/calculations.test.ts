@@ -4,7 +4,7 @@ import {
   aggregateAccounts, annualToMonthlyRate, applyScenarioOverrides, calculateFireNumber,
   emergencyFundMetrics, findFireCrossing, growAccountOneMonth, projectCore,
   projectScenario, resolvePhase, scenarioBudgetMetrics, solveRequiredAdditionalContribution,
-  solveRequiredContributionScale,
+  solveRequiredContributionScale, nominalReturnFromReal, realReturnFromNominal,
 } from '../src/domain/calculations';
 import type { Account, Profile } from '../src/domain/types';
 
@@ -13,6 +13,10 @@ const account: Account = { ...defaultData.accounts[3], id: 'test', balance: 1000
 
 describe('financial calculations', () => {
   it('calculates the FIRE number', () => expect(calculateFireNumber(52500, 0.035)).toBeCloseTo(1500000));
+  it('keeps real and nominal returns consistent with inflation', () => {
+    expect(nominalReturnFromReal(0.05, 0.025)).toBeCloseTo(0.07625, 10);
+    expect(realReturnFromNominal(0.07625, 0.025)).toBeCloseTo(0.05, 10);
+  });
   it('converts annual to effective monthly return', () => expect(Math.pow(1 + annualToMonthlyRate(0.12), 12) - 1).toBeCloseTo(0.12, 10));
   it('grows an account with beginning-of-month contributions', () => expect(growAccountOneMonth(1000, 100, 0.12)).toBeCloseTo(1100 * Math.pow(1.12, 1 / 12)));
   it('aggregates only eligible and included accounts', () => {
@@ -69,7 +73,8 @@ describe('financial calculations', () => {
   });
   it('applies scenario overrides without mutating base data', () => {
     const result = applyScenarioOverrides(defaultData, defaultData.scenarios[1]);
-    expect(result.profile.realReturn).toBe(0.04);
+    expect(result.profile.realReturn).toBeCloseTo(0.04, 10);
+    expect(result.profile.nominalReturn).toBeCloseTo(0.066, 10);
     expect(defaultData.profile.realReturn).toBe(0.05);
   });
   it('raises the nominal FIRE target with inflation but keeps real target constant', () => {

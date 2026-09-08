@@ -1,11 +1,12 @@
 import { defaultData } from '../domain/defaults';
+import { nominalReturnFromReal, realReturnFromNominal } from '../domain/calculations';
 import type { AppData } from '../domain/types';
 
 const STORAGE_KEY = 'fire-projector-v1';
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const legacyStarterScenarios = [
   { id: 'base', name: 'Base FIRE at 50', overrides: {} },
-  { id: 'conservative', name: 'Conservative returns', overrides: { realReturn: 0.04 } },
+  { id: 'conservative', name: 'Conservative returns', overrides: { nominalReturn: 0.066 } },
   { id: 'higher', name: 'Higher contributions', overrides: { contributionScale: 1.2, contributions: { taxable: { personal: 1342 } } } },
   { id: 'lower', name: 'Lower contributions', overrides: { contributionScale: 0.72 } },
   { id: 'lifestyle', name: 'Higher retirement lifestyle', overrides: { annualSpending: 61250 } },
@@ -19,16 +20,32 @@ const migrateStarterScenarios = (data: AppData): AppData => {
     });
   return isUntouchedLegacySet ? { ...data, scenarios: clone(defaultData.scenarios) } : data;
 };
-const normalizeData = (data: AppData): AppData => ({
-  ...data,
-  accounts: data.accounts.map((account) => account.type === 'Crypto' && account.returnMode === undefined
-    ? {
-        ...account,
-        returnMode: 'plan',
-        notes: account.notes === 'No growth assumed by default.' ? 'Uses the selected scenario return unless a custom return is chosen.' : account.notes,
-      }
-    : account),
-});
+const normalizeData = (data: AppData): AppData => {
+  const profile = { ...data.profile, realReturn: realReturnFromNominal(data.profile.nominalReturn, data.profile.inflationRate) };
+  return {
+    ...data,
+    profile,
+    scenarios: data.scenarios.map((scenario) => {
+      const { realReturn, ...overrides } = scenario.overrides;
+      return {
+        ...scenario,
+        overrides: {
+          ...overrides,
+          ...(scenario.overrides.nominalReturn === undefined && realReturn !== undefined
+            ? { nominalReturn: nominalReturnFromReal(realReturn, scenario.overrides.inflationRate ?? profile.inflationRate) }
+            : {}),
+        },
+      };
+    }),
+    accounts: data.accounts.map((account) => account.type === 'Crypto' && account.returnMode === undefined
+      ? {
+          ...account,
+          returnMode: 'plan',
+          notes: account.notes === 'No growth assumed by default.' ? 'Uses the selected scenario return unless a custom return is chosen.' : account.notes,
+        }
+      : account),
+  };
+};
 
 export const loadData = (): AppData => {
   try {

@@ -7,6 +7,7 @@ import { applyScenarioOverrides } from '../domain/calculations';
 type Setter = Dispatch<SetStateAction<AppData>>;
 const accountTypes: AccountType[] = ['Roth 401(k)', 'Traditional 401(k)', 'Roth IRA', 'Traditional IRA', 'Taxable Brokerage', 'HYSA / Cash', 'Treasury / Bonds', 'Crypto', 'HSA', 'Other'];
 const assetClasses: AssetClass[] = ['Broad US equity', 'International equity', 'Bonds', 'Cash', 'Bitcoin / Crypto', 'Individual stock', 'Other'];
+const percentageInput = (rate: number) => Math.round(rate * 10000) / 100;
 
 export function ProfileEditor({ data, setData, scenario }: { data: AppData; setData: Setter; scenario: Scenario }) {
   const p = applyScenarioOverrides(data, scenario).profile;
@@ -19,6 +20,15 @@ export function ProfileEditor({ data, setData, scenario }: { data: AppData; setD
   const update = <K extends keyof AppData['profile']>(key: K, value: AppData['profile'][K]) => setData((old) => scenarioKeys.has(key)
     ? { ...old, scenarios: old.scenarios.map((item) => item.id === scenario.id ? { ...item, overrides: { ...item.overrides, [key]: value } } : item) }
     : { ...old, profile: { ...old.profile, [key]: value } });
+  const updateReturnAssumption = (key: 'nominalReturn' | 'inflationRate', value: number) => setData((old) => {
+    const currentScenario = old.scenarios.find((item) => item.id === scenario.id);
+    if (!currentScenario) return old;
+    const current = applyScenarioOverrides(old, currentScenario).profile;
+    const nominalReturn = key === 'nominalReturn' ? value : current.nominalReturn;
+    const inflationRate = key === 'inflationRate' ? value : current.inflationRate;
+    const { realReturn: _legacyRealReturn, ...otherOverrides } = currentScenario.overrides;
+    return { ...old, scenarios: old.scenarios.map((item) => item.id === currentScenario.id ? { ...item, overrides: { ...otherOverrides, nominalReturn, inflationRate } } : item) };
+  });
   return <div className="editor-stack">
     <div className="editor-grid">
       <TextField label="Plan name · matches selected scenario" value={scenario.name} onChange={updatePlanName} />
@@ -26,7 +36,7 @@ export function ProfileEditor({ data, setData, scenario }: { data: AppData; setD
       <Field label="Target retirement age" value={p.retirementAge} min={p.currentAge + .1} step={0.1} onChange={(v) => update('retirementAge', v)} error={p.retirementAge <= p.currentAge ? 'Must be after your current age.' : undefined} />
       <Field label="Maximum projection age · shared" value={p.maxAge} min={p.retirementAge + .1} step={1} onChange={(v) => update('maxAge', v)} error={p.maxAge <= p.retirementAge ? 'Must be after retirement age.' : undefined} />
       <Field label="Annual retirement spending" value={p.annualSpending} min={0} step={500} prefix="$" onChange={(v) => update('annualSpending', Math.max(0, v))} />
-      <Field label="Safe withdrawal rate" value={Math.round(p.withdrawalRate * 10000) / 100} min={0.1} max={99.9} step={0.05} suffix="%" onChange={(v) => update('withdrawalRate', v / 100)} hint="FIRE number = annual spending ÷ withdrawal rate." />
+      <Field label="Safe withdrawal rate" value={Math.round(p.withdrawalRate * 10000) / 100} min={0.1} max={99.9} step={0.05} suffix="%" onChange={(v) => update('withdrawalRate', v / 100)} hint="The share of your FIRE portfolio you plan to withdraw in the first retirement year. Lower rates require a larger FIRE goal and more savings; higher rates reduce the goal but leave less margin. FIRE goal = annual spending ÷ withdrawal rate." />
     </div>
     <div className="goal-override">
       <div><span className="eyebrow">FIRE goal source</span><strong>{p.customFireNumber == null ? 'Spending-based calculation' : 'Custom target'}</strong></div>
@@ -35,12 +45,13 @@ export function ProfileEditor({ data, setData, scenario }: { data: AppData; setD
         : <><Field label="Custom FIRE target" value={p.customFireNumber} min={1} prefix="$" step={10000} onChange={(v) => update('customFireNumber', Math.max(1, v))} /><button className="button secondary" onClick={() => update('customFireNumber', null)}>Reset to calculation</button></>}
     </div>
     <div className="editor-grid">
-      <SelectField label="Projection dollars · shared" value={p.mode} onChange={(v) => update('mode', v as 'real' | 'nominal')}><option value="real">Today’s dollars (real)</option><option value="nominal">Future dollars (nominal)</option></SelectField>
-      <Field label="Expected real return" value={p.realReturn * 100} min={-99} step={0.1} suffix="%" onChange={(v) => update('realReturn', v / 100)} />
-      <Field label="Expected nominal return" value={p.nominalReturn * 100} min={-99} step={0.1} suffix="%" onChange={(v) => update('nominalReturn', v / 100)} />
-      <Field label="Inflation rate" value={p.inflationRate * 100} min={-99} step={0.1} suffix="%" onChange={(v) => update('inflationRate', v / 100)} />
+      <SelectField label="Projection dollars · display preference" value={p.mode} onChange={(v) => update('mode', v as 'real' | 'nominal')}><option value="real">Today’s dollars (real)</option><option value="nominal">Future dollars (nominal)</option></SelectField>
+      <Field label="Expected nominal return" value={percentageInput(p.nominalReturn)} min={-99} step={0.1} suffix="%" onChange={(v) => updateReturnAssumption('nominalReturn', v / 100)} hint="Editable market-return assumption. Real return = (1 + nominal return) ÷ (1 + inflation) − 1. For example, 7% nominal with 2.5% inflation produces 4.39% real." />
+      <Field label="Expected real return · calculated" value={percentageInput(p.realReturn)} min={-99} step={0.1} suffix="%" onChange={() => undefined} readOnly hint="Calculated automatically as (1 + nominal return) ÷ (1 + inflation) − 1. It is rounded to two decimal places for display." />
+      <Field label="Inflation rate" value={percentageInput(p.inflationRate)} min={-99} step={0.1} suffix="%" onChange={(v) => updateReturnAssumption('inflationRate', v / 100)} hint="Changing inflation recalculates the real return while keeping the nominal return unchanged." />
       <Field label="Roth IRA contribution basis · shared" value={p.rothContributionBasis} min={0} step={500} prefix="$" onChange={(v) => update('rothContributionBasis', Math.max(0, v))} hint="Enter regular contributions only—not the full balance or earnings." />
     </div>
+    <p className="return-assumption-note">Nominal return is the editable market-return assumption. Real return updates automatically from nominal return and inflation. Projection dollars only controls how results and spending are displayed.</p>
   </div>;
 }
 

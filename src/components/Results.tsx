@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, ComposedChart, Legend, Line, LineChart, Pie, PieChart, ReferenceDot, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { AppData, Scenario, ScenarioResult } from '../domain/types';
 import { scenarioColors } from '../domain/defaults';
-import { allocationByClass, applyScenarioOverrides, emergencyFundMetrics, projectCore, scenarioBudgetMetrics } from '../domain/calculations';
+import { allocationByClass, applyScenarioOverrides, emergencyFundMetrics, nominalReturnFromReal, projectCore, scenarioBudgetMetrics } from '../domain/calculations';
 import { age, money, percent, Section } from './ui';
 const allocationColors = ['#37d39a', '#65a7ff', '#f4b860', '#ad7bff', '#ff718d', '#40c7d9', '#8191a1'];
 
@@ -188,7 +188,8 @@ export function Sensitivity({ data, selectedScenario }: { data: AppData; selecte
     const crossing = projectCore({ profile, accounts, phases }).find((p) => p.firePortfolio >= p.fireTarget);
     return crossing?.age;
   };
-  const returns = [.03, .04, .05, .06, .07].map((value) => ({ label: percent(value, 0), age: fireAgeFor({ ...selectedScenario, overrides: { ...selectedScenario.overrides, realReturn: value } }) }));
+  const selectedProfile = applyScenarioOverrides(data, selectedScenario).profile;
+  const returns = [.03, .04, .05, .06, .07].map((value) => ({ label: percent(value, 0), age: fireAgeFor({ ...selectedScenario, overrides: { ...selectedScenario.overrides, nominalReturn: nominalReturnFromReal(value, selectedProfile.inflationRate) } }) }));
   const contributions = [-1000, -500, -250, 0, 250, 500, 1000].map((delta) => { const current = selectedScenario.overrides.contributionScale ?? 1; const base = Math.max(1, data.phases.at(-1) ? Object.values(data.phases.at(-1)!.contributions).reduce((s, v) => s + v.personal, 0) : 1); return { label: delta === 0 ? 'Base' : `${delta > 0 ? '+' : '−'}${money(Math.abs(delta))}`, age: fireAgeFor({ ...selectedScenario, overrides: { ...selectedScenario.overrides, contributionScale: Math.max(0, current + delta / base) } }) }; });
   const spending = [-.2, -.1, 0, .1, .2].map((delta) => ({ label: delta === 0 ? 'Base' : `${delta > 0 ? '+' : ''}${percent(delta, 0)}`, age: fireAgeFor({ ...selectedScenario, overrides: { ...selectedScenario.overrides, annualSpending: (selectedScenario.overrides.annualSpending ?? data.profile.annualSpending) * (1 + delta) } }) }));
   const rates = [.03, .0325, .035, .0375, .04].map((value) => ({ label: percent(value, value % .01 ? 2 : 1), age: fireAgeFor({ ...selectedScenario, overrides: { ...selectedScenario.overrides, withdrawalRate: value } }) }));

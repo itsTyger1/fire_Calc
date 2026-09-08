@@ -13,6 +13,12 @@ export const calculateFireNumber = (annualSpending: number, withdrawalRate: numb
 export const annualToMonthlyRate = (annualRate: number) =>
   Math.pow(1 + Math.max(-0.999999, annualRate), 1 / 12) - 1;
 
+export const nominalReturnFromReal = (realReturn: number, inflationRate: number) =>
+  (1 + realReturn) * (1 + Math.max(-0.999999, inflationRate)) - 1;
+
+export const realReturnFromNominal = (nominalReturn: number, inflationRate: number) =>
+  (1 + nominalReturn) / (1 + Math.max(-0.999999, inflationRate)) - 1;
+
 export const growAccountOneMonth = (balance: number, contribution: number, annualRate: number) =>
   (Math.max(0, balance) + Math.max(0, contribution)) * (1 + annualToMonthlyRate(annualRate));
 
@@ -87,6 +93,7 @@ export const applyScenarioOverrides = (data: AppData, scenario: Scenario) => {
       };
     });
   });
+  profile.realReturn = realReturnFromNominal(profile.nominalReturn, profile.inflationRate);
   return { profile, accounts, phases };
 };
 

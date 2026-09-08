@@ -22,6 +22,7 @@ export function InputHub({ data, setData, scenario, setSelected, phaseId, setPha
   const [scenarioMenuOpen, setScenarioMenuOpen] = useState(false);
   const [scenarioDraftName, setScenarioDraftName] = useState(scenario.name);
   const scenarioPickerRef = useRef<HTMLDivElement>(null);
+  const scenarioOptionsRef = useRef<HTMLDetailsElement>(null);
   const budget = scenarioBudgetMetrics(data, scenario, 1, phaseId);
   const effective = applyScenarioOverrides(data, scenario);
   const patchScenario = (patch: Partial<Scenario>) => setData((old) => ({ ...old, scenarios: old.scenarios.map((item) => item.id === scenario.id ? { ...item, ...patch } : item) }));
@@ -39,6 +40,14 @@ export function InputHub({ data, setData, scenario, setSelected, phaseId, setPha
     setScenarioMenuOpen(false);
     setSelected(id);
   };
+  const deleteScenario = (id: string) => {
+    if (data.scenarios.length <= 1) return;
+    const target = data.scenarios.find((item) => item.id === id);
+    if (!target || !window.confirm(`Delete ${target.name}?`)) return;
+    const remaining = data.scenarios.filter((item) => item.id !== id);
+    setData((old) => ({ ...old, scenarios: remaining }));
+    if (id === scenario.id) setSelected(remaining[0].id);
+  };
   const visibleScenarioOptions = scenarioDraftName === scenario.name
     ? data.scenarios
     : data.scenarios.filter((item) => item.name.toLowerCase().includes(scenarioDraftName.trim().toLowerCase()));
@@ -52,6 +61,15 @@ export function InputHub({ data, setData, scenario, setSelected, phaseId, setPha
     document.addEventListener('pointerdown', closeOnOutsideClick);
     return () => document.removeEventListener('pointerdown', closeOnOutsideClick);
   }, [scenarioMenuOpen, scenarioDraftName, scenario.name]);
+  useEffect(() => {
+    const closeScenarioOptionsOnOutsideClick = (event: PointerEvent) => {
+      const options = scenarioOptionsRef.current;
+      if (!options?.open || options.contains(event.target as Node)) return;
+      options.removeAttribute('open');
+    };
+    document.addEventListener('pointerdown', closeScenarioOptionsOnOutsideClick);
+    return () => document.removeEventListener('pointerdown', closeScenarioOptionsOnOutsideClick);
+  }, []);
   const updateShared = <K extends keyof AppData['profile']>(key: K, value: AppData['profile'][K]) => setData((old) => ({ ...old, profile: { ...old.profile, [key]: value } }));
   const addScenario = (duplicate: boolean) => {
     const next: Scenario = {
@@ -73,9 +91,9 @@ export function InputHub({ data, setData, scenario, setSelected, phaseId, setPha
   return <section id="inputs" className="input-hub" aria-labelledby="input-heading">
     <div className="input-intro"><div><span className="eyebrow">Set up once. Explore below.</span><h1 id="input-heading">Your FIRE plan</h1><p>All your inputs in one place. Press <kbd>Enter</kbd> to apply a number; <kbd>Esc</kbd> to cancel. Changes save automatically.</p></div><a href="#results" className="button primary">View results ↓</a></div>
     <div className="scenario-toolbar">
-      <div ref={scenarioPickerRef} className="field scenario-picker"><span className="field-label">Scenario you’re editing</span><span className="scenario-picker-control"><span className="scenario-picker-input-wrap"><input className="text-input" role="combobox" aria-label="Scenario you’re editing" aria-expanded={scenarioMenuOpen} aria-controls="scenario-options" value={scenarioDraftName} onFocus={() => setScenarioMenuOpen(true)} onClick={() => setScenarioMenuOpen(true)} onChange={(event) => { setScenarioDraftName(event.target.value); setScenarioMenuOpen(true); }} onBlur={() => { window.setTimeout(() => { commitScenarioName(); setScenarioMenuOpen(false); }, 0); }} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commitScenarioName(); setScenarioMenuOpen(false); } else if (event.key === 'Escape') { event.preventDefault(); setScenarioDraftName(scenario.name); setScenarioMenuOpen(false); } }} /><ChevronDown className="scenario-picker-chevron" size={15} aria-hidden="true" /></span><button type="button" className="icon-button" disabled={data.scenarios.length >= 8} onClick={() => addScenario(false)} aria-label="Add scenario" title="Add scenario"><Plus size={17} /></button></span>{scenarioMenuOpen && <div className="scenario-picker-menu" id="scenario-options" role="listbox">{visibleScenarioOptions.length > 0 ? visibleScenarioOptions.map((item) => <button type="button" role="option" aria-selected={item.id === scenario.id} key={item.id} onMouseDown={(event) => { event.preventDefault(); selectScenario(item.id); }}>{item.name}</button>) : <span className="scenario-picker-empty">No matching scenarios</span>}</div>}</div>
+      <div ref={scenarioPickerRef} className="field scenario-picker"><span className="field-label">Scenario you’re editing</span><span className="scenario-picker-control"><span className="scenario-picker-input-wrap"><input className="text-input" role="combobox" aria-label="Scenario you’re editing" aria-expanded={scenarioMenuOpen} aria-controls="scenario-options" value={scenarioDraftName} onFocus={() => setScenarioMenuOpen(true)} onClick={() => setScenarioMenuOpen(true)} onChange={(event) => { setScenarioDraftName(event.target.value); setScenarioMenuOpen(true); }} onBlur={() => { window.setTimeout(() => { commitScenarioName(); setScenarioMenuOpen(false); }, 0); }} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commitScenarioName(); setScenarioMenuOpen(false); } else if (event.key === 'Escape') { event.preventDefault(); setScenarioDraftName(scenario.name); setScenarioMenuOpen(false); } }} /><ChevronDown className="scenario-picker-chevron" size={15} aria-hidden="true" /></span><button type="button" className="icon-button" disabled={data.scenarios.length >= 8} onClick={() => addScenario(false)} aria-label="Add scenario" title="Add scenario"><Plus size={17} /></button></span>{scenarioMenuOpen && <div className="scenario-picker-menu" id="scenario-options" role="listbox">{visibleScenarioOptions.length > 0 ? visibleScenarioOptions.map((item) => <div className="scenario-option-row" role="option" aria-selected={item.id === scenario.id} key={item.id} onMouseDown={(event) => { if ((event.target as HTMLElement).closest('button')) return; event.preventDefault(); selectScenario(item.id); }}><span>{item.name}</span><button type="button" className="scenario-option-delete" disabled={data.scenarios.length <= 1} aria-label={`Delete ${item.name}`} title={`Delete ${item.name}`} onMouseDown={(event) => event.preventDefault()} onClick={() => deleteScenario(item.id)}><Trash2 size={14} /></button></div>) : <span className="scenario-picker-empty">No matching scenarios</span>}</div>}</div>
       <p>Goals and monthly amounts apply to this scenario. Fields marked “shared” apply to every scenario.</p>
-      <div className="scenario-toolbar-actions"><details className="scenario-options"><summary>Manage scenarios</summary><div className="scenario-options-body">
+      <div className="scenario-toolbar-actions"><details ref={scenarioOptionsRef} className="scenario-options"><summary>Manage scenarios</summary><div className="scenario-options-body">
         <Toggle label="Show on timeline" checked={scenario.visible} onChange={(visible) => patchScenario({ visible })} />
         <div className="scenario-modal-actions"><button className="button secondary" disabled={data.scenarios.length >= 8} onClick={() => addScenario(false)}><Plus size={14} /> New</button><button className="button secondary" disabled={data.scenarios.length >= 8} onClick={() => addScenario(true)}><Copy size={14} /> Duplicate</button></div>
         <button className="button secondary" onClick={() => { if (window.confirm(`Reset all overrides for ${scenario.name}?`)) patchScenario({ overrides: {} }); }}><RefreshCcw size={14} /> Reset scenario</button>

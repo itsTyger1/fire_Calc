@@ -14,7 +14,7 @@ export const age = (value?: number | null) => value == null || !Number.isFinite(
 
 const numberText = (value: number) => Number.isFinite(value) ? String(value) : '';
 
-export function CommittedNumberInput({ value, onCommit, min, max, step = 1, ariaLabel, className }: {
+export function CommittedNumberInput({ value, onCommit, min, max, step = 1, ariaLabel, className, readOnly = false }: {
   value: number;
   onCommit: (value: number) => void;
   min?: number;
@@ -22,6 +22,7 @@ export function CommittedNumberInput({ value, onCommit, min, max, step = 1, aria
   step?: number;
   ariaLabel?: string;
   className?: string;
+  readOnly?: boolean;
 }) {
   const [draft, setDraft] = useState(() => numberText(value));
   const inputRef = useRef<HTMLInputElement>(null);
@@ -46,9 +47,12 @@ export function CommittedNumberInput({ value, onCommit, min, max, step = 1, aria
     ref={inputRef}
     className={[className, pending ? 'pending-value' : ''].filter(Boolean).join(' ')}
     aria-label={ariaLabel}
+    aria-readonly={readOnly || undefined}
     title="Press Enter to apply this value. Press Escape to cancel."
     type="number"
     value={draft}
+    readOnly={readOnly}
+    disabled={readOnly}
     step={step}
     min={min}
     max={max}
@@ -68,15 +72,15 @@ export function CommittedNumberInput({ value, onCommit, min, max, step = 1, aria
   />;
 }
 
-export function Field({ label, value, onChange, prefix, suffix, step = 1, min, max, hint, error }: {
+export function Field({ label, value, onChange, prefix, suffix, step = 1, min, max, hint, error, readOnly = false }: {
   label: string; value: number; onChange: (value: number) => void; prefix?: string; suffix?: string;
-  step?: number; min?: number; max?: number; hint?: string; error?: string;
+  step?: number; min?: number; max?: number; hint?: string; error?: string; readOnly?: boolean;
 }) {
   return <label className="field">
     <span className="field-label">{label}{hint && <span className="hint" title={hint}><Info size={13} /></span>}</span>
     <span className={`input-shell ${error ? 'invalid' : ''}`}>
       {prefix && <span>{prefix}</span>}
-      <CommittedNumberInput ariaLabel={label} value={value} step={step} min={min} max={max} onCommit={onChange} />
+      <CommittedNumberInput ariaLabel={label} value={value} step={step} min={min} max={max} onCommit={onChange} readOnly={readOnly} className={readOnly ? 'read-only-input' : undefined} />
       {suffix && <span>{suffix}</span>}
     </span>
     {error && <small className="field-error">{error}</small>}

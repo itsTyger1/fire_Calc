@@ -57,7 +57,18 @@ export default function App() {
   if (!base || !selectedScenario || !selectedBudget) return <main className="fatal"><Flame /><h1>No scenarios found</h1><button className="button primary" onClick={() => setData(clone(defaultData))}>Restore defaults</button></main>;
   const delta = base.targetPoint.firePortfolio - base.targetPoint.fireTarget;
   const fireProgress = base.currentFirePortfolio / Math.max(1, base.fireNumber);
-  const contributionDifference = base.plannedPersonalMonthly - base.requiredPersonalMonthly;
+  const monthlyFireInvesting = base.plannedPersonalMonthly + base.plannedEmployerMonthly;
+  const requiredMonthlyFireInvesting = Number.isFinite(base.requiredPersonalMonthly)
+    ? base.requiredPersonalMonthly + base.plannedEmployerMonthly
+    : Infinity;
+  const contributionDifference = monthlyFireInvesting - requiredMonthlyFireInvesting;
+  const contributionStatus = !Number.isFinite(requiredMonthlyFireInvesting)
+    ? 'Goal is outside the solver range'
+    : Math.abs(contributionDifference) < 1
+      ? 'Current contributions are on target'
+      : contributionDifference > 0
+        ? `${money(contributionDifference)}/mo above amount needed`
+        : `${money(-contributionDifference)}/mo more needed`;
   return <div className="app-shell">
     <header className="topbar"><div className="brand"><span><Flame size={19} /></span><div><strong>FIRE Projector</strong><small>{data.profile.mode === 'real' ? 'Today’s dollars' : 'Future nominal dollars'}</small></div></div><div className="top-actions"><button className="button ghost" onClick={() => downloadData(data)}><Download size={16} /> <span>Export</span></button><button className="button ghost" onClick={() => importRef.current?.click()}><Upload size={16} /> <span>Import</span></button><button className="button ghost" onClick={handleRefresh}><RefreshCcw size={16} /> <span>Refresh app</span></button><button className="button ghost" onClick={update?.updateAvailable && update.downloadUrl ? installUpdate : handleUpdate} disabled={checkingUpdate}><RefreshCcw size={16} /> <span>{checkingUpdate ? 'Checking…' : update?.updateAvailable && update.downloadUrl ? `Update ${update.latestVersion}` : 'Check updates'}</span></button><button className="button danger" onClick={handleReset}><RefreshCcw size={16} /> <span>Reset</span></button><input ref={importRef} type="file" accept="application/json" hidden onChange={(e) => void handleImport(e.target.files?.[0])} /></div></header>
 
@@ -72,8 +83,7 @@ export default function App() {
         <Metric label="FIRE portfolio" value={money(base.currentFirePortfolio)} sub={`${percent(fireProgress)} of target`} tone="accent" info="Only accounts marked FIRE eligible." />
         <Metric label="FIRE goal" value={money(base.fireNumber)} sub={base.profile.customFireNumber == null ? "Based on spending and withdrawal rate" : "Custom target"} />
         <Metric label="Projected FIRE" value={age(base.firePoint?.age)} sub={base.firePoint ? new Date(base.firePoint.date).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) : `Not by age ${base.profile.maxAge}`} tone={base.firePoint && base.firePoint.age <= base.profile.retirementAge ? 'positive' : 'negative'} />
-        <Metric label="Monthly FIRE investing" value={`${money(base.plannedPersonalMonthly + base.plannedEmployerMonthly)}/mo`} sub={`${money(base.plannedEmployerMonthly)} from employer`} />
-        <Metric label="Required FIRE contribution" value={Number.isFinite(base.requiredPersonalMonthly) ? `${money(base.requiredPersonalMonthly)}/mo` : 'Not reachable'} sub={!Number.isFinite(base.requiredPersonalMonthly) ? 'Goal is outside the solver range' : Math.abs(contributionDifference) < 1 ? 'Current allocation is on target' : contributionDifference > 0 ? `${money(contributionDifference)}/mo above minimum` : `${money(-contributionDifference)}/mo more needed`} tone={contributionDifference >= 0 ? 'positive' : 'negative'} info="Minimum personal FIRE contribution, preserving this scenario’s account allocation proportions across its phases." />
+        <Metric label="Monthly FIRE investing" value={`${money(monthlyFireInvesting)}/mo`} sub={<><span className="metric-secondary-value">Required monthly: {money(requiredMonthlyFireInvesting)}/mo</span><span>{contributionStatus}</span></>} tone={contributionDifference >= 0 ? 'positive' : 'negative'} info="The main number is the total currently budgeted for FIRE, including employer contributions. The smaller number is the total monthly amount needed to reach the FIRE goal while employer contributions remain constant." />
       </section>
 
       <RetirementDrawdown result={base} />
