@@ -93,22 +93,52 @@ function createWindow() {
   }
 }
 
+const planSavesDirectory = () => path.join(app.getPath('userData'), 'saves');
+const isValidPlanData = (data) => Boolean(
+  data
+  && typeof data === 'object'
+  && data.version === 1
+  && data.profile
+  && ['accounts', 'phases', 'scenarios', 'budget'].every((key) => Array.isArray(data[key])),
+);
+const listPlanFiles = async () => {
+  const directory = planSavesDirectory();
+  await fs.promises.mkdir(directory, { recursive: true });
+  const entries = await fs.promises.readdir(directory, { withFileTypes: true });
+  const plans = await Promise.all(entries
+    .filter((entry) => entry.isFile() && /\.json$/i.test(entry.name))
+    .map(async (entry) => {
+      try {
+        const raw = await fs.promises.readFile(path.join(directory, entry.name), 'utf8');
+        const saved = JSON.parse(raw);
+        if (!saved || typeof saved.id !== 'string' || typeof saved.name !== 'string' || !saved.name.trim() || typeof saved.savedAt !== 'string' || !isValidPlanData(saved.data)) return null;
+        return { id: saved.id, name: saved.name.trim(), savedAt: saved.savedAt, data: saved.data };
+      } catch {
+        return null;
+      }
+    }));
+  return plans.filter((plan) => plan !== null).sort((left, right) => right.savedAt.localeCompare(left.savedAt));
+};
+
 ipcMain.handle('save-plan-file', async (event, suggestedName, data) => {
-  if (!data || data.version !== 1 || !data.profile || !['accounts', 'phases', 'scenarios', 'budget'].every((key) => Array.isArray(data[key]))) throw new Error('Invalid plan data');
+  if (!isValidPlanData(data)) throw new Error('Invalid plan data');
   const parent = BrowserWindow.fromWebContents(event.sender);
   const name = String(suggestedName || 'My FIRE plan').replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').replace(/[. ]+$/g, '').slice(0, 100) || 'My FIRE plan';
+  const directory = planSavesDirectory();
+  await fs.promises.mkdir(directory, { recursive: true });
   const result = await dialog.showSaveDialog(parent, {
     title: 'Save FIRE plan',
-    defaultPath: path.join(app.getPath('documents'), `${name}.json`),
+    defaultPath: path.join(directory, `${name}.json`),
     filters: [{ name: 'FIRE plan', extensions: ['json'] }],
     buttonLabel: 'Save plan',
   });
   if (result.canceled || !result.filePath) return { canceled: true };
-  const filePath = result.filePath;
-  const saved = { id: randomUUID(), name: path.basename(filePath, path.extname(filePath)), savedAt: new Date().toISOString(), data };
+  const filePath = result.filePath.toLowerCase().endsWith('.json') ? result.filePath : `${result.filePath}.json`;
+  const saved = { id: randomUUID(), name: path.basename(filePath, path.extname(filePath)) || name, savedAt: new Date().toISOString(), data };
   const temporaryPath = `${filePath}.${randomUUID()}.tmp`;
   try {
     await fs.promises.writeFile(temporaryPath, JSON.stringify(saved, null, 2), { encoding: 'utf8', flag: 'wx' });
+    await fs.promises.rm(filePath, { force: true });
     await fs.promises.rename(temporaryPath, filePath);
   } catch (error) {
     await fs.promises.rm(temporaryPath, { force: true }).catch(() => {});
@@ -116,6 +146,8 @@ ipcMain.handle('save-plan-file', async (event, suggestedName, data) => {
   }
   return { canceled: false, name: saved.name, filePath };
 });
+
+ipcMain.handle('list-plan-files', () => listPlanFiles());
 
 ipcMain.handle('check-for-updates', async () => {
   let release;
@@ -155,6 +187,7 @@ ipcMain.handle('download-and-install-update', async (_event, downloadUrl) => {
 Menu.setApplicationMenu(null);
 
 app.whenReady().then(() => {
+  void fs.promises.mkdir(planSavesDirectory(), { recursive: true });
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

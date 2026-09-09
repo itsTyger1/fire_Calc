@@ -2,7 +2,7 @@
 
 A private Windows desktop planner built with Electron, React, and TypeScript. Your plan is saved locally; Save and Load keep named plan snapshots on this computer. Version 1.1 keeps the existing saved-plan format.
 
-In the desktop app, **Save** opens Windows **Save As**. Enter a file name and choose a folder (Documents is the default), then click **Save plan**. A confirmation shows the full path to the saved JSON file and stays open until dismissed. The file contains the complete plan, its name, and save time. A local copy is also available from **Load**. Canceling the dialog saves nothing. The web version keeps named saves in browser storage and identifies that location in its confirmation.
+In the desktop app, **Save** opens Windows **Save As** in the app’s writable `saves` folder under its user-data directory. Enter a file name and click **Save plan**; you can still choose another folder in the dialog if needed. A confirmation shows the full path to the saved JSON file and stays open until dismissed. The file contains the complete plan, its name, and save time. **Load** lists the plan files found in the app’s `saves` folder. Canceling the dialog saves nothing. The web version keeps named saves in browser storage and identifies that location in its confirmation.
 
 ## Using the app
 

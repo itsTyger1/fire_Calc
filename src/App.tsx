@@ -11,7 +11,10 @@ import { age, Metric, money, percent, Section } from './components/ui';
 type UpdateCheck = { currentVersion: string; latestVersion?: string; updateAvailable: boolean; downloadUrl?: string | null; releaseUrl?: string; noPublishedRelease?: boolean };
 declare global { interface Window {
   fireUpdater?: { check: () => Promise<UpdateCheck>; install: (downloadUrl: string) => Promise<{ started: boolean }> };
-  firePlans?: { save: (name: string, data: AppData) => Promise<{ canceled: true } | { canceled: false; name: string; filePath: string }> };
+  firePlans?: {
+    save: (name: string, data: AppData) => Promise<{ canceled: true } | { canceled: false; name: string; filePath: string }>;
+    list: () => Promise<SavedPlan[]>;
+  };
 } }
 const clone = <T,>(value: T): T => structuredClone(value);
 export default function App() {
@@ -23,7 +26,7 @@ export default function App() {
   const [installingUpdate, setInstallingUpdate] = useState(false);
   const [updatePromptOpen, setUpdatePromptOpen] = useState(false);
   const [requestedPhaseId, setPhaseId] = useState<string>();
-  const [savedPlans, setSavedPlans] = useState<SavedPlan[]>(() => listSavedPlans());
+  const [savedPlans, setSavedPlans] = useState<SavedPlan[]>(() => window.firePlans ? [] : listSavedPlans());
   const [loadMenuOpen, setLoadMenuOpen] = useState(false);
   const loadMenuRef = useRef<HTMLDivElement>(null);
   const [savingPlan, setSavingPlan] = useState(false);
@@ -58,6 +61,14 @@ export default function App() {
     return () => document.removeEventListener('pointerdown', closeOnOutsideClick);
   }, [loadMenuOpen]);
 
+  const refreshSavedPlans = async () => {
+    try {
+      setSavedPlans(window.firePlans ? await window.firePlans.list() : listSavedPlans());
+    } catch {
+      setToast('Could not read saved plans');
+    }
+  };
+
   const handleSave = async () => {
     if (savingPlan) return;
     setSavingPlan(true);
@@ -67,8 +78,7 @@ export default function App() {
         if (result.canceled) return;
         let warning: string | undefined;
         try {
-          saveNamedPlan(result.name, data);
-          setSavedPlans(listSavedPlans());
+          setSavedPlans(await window.firePlans.list());
         } catch { warning = 'The file was saved, but the app could not add a copy to the Load menu.'; }
         setSaveConfirmation({ name: result.name, location: result.filePath, warning });
         return;
@@ -86,7 +96,7 @@ export default function App() {
     finally { setSavingPlan(false); }
   };
   const handleToggleLoadMenu = () => {
-    if (!loadMenuOpen) setSavedPlans(listSavedPlans());
+    if (!loadMenuOpen) void refreshSavedPlans();
     setLoadMenuOpen((open) => !open);
   };
   const handleLoad = (saved: SavedPlan) => {
