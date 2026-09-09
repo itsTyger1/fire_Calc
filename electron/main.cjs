@@ -1,10 +1,11 @@
-const { app, BrowserWindow, Menu, shell, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, shell, ipcMain, dialog } = require('electron');
 const https = require('node:https');
 const fs = require('node:fs');
 const os = require('node:os');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const { pipeline } = require('node:stream/promises');
+const { randomUUID } = require('node:crypto');
 
 const developmentUrl = process.env.VITE_DEV_SERVER_URL;
 const releaseApi = 'https://api.github.com/repos/itsTyger1/fire_Calc/releases/latest';
@@ -91,6 +92,30 @@ function createWindow() {
     void window.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   }
 }
+
+ipcMain.handle('save-plan-file', async (event, suggestedName, data) => {
+  if (!data || data.version !== 1 || !data.profile || !['accounts', 'phases', 'scenarios', 'budget'].every((key) => Array.isArray(data[key]))) throw new Error('Invalid plan data');
+  const parent = BrowserWindow.fromWebContents(event.sender);
+  const name = String(suggestedName || 'My FIRE plan').replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').replace(/[. ]+$/g, '').slice(0, 100) || 'My FIRE plan';
+  const result = await dialog.showSaveDialog(parent, {
+    title: 'Save FIRE plan',
+    defaultPath: path.join(app.getPath('documents'), `${name}.json`),
+    filters: [{ name: 'FIRE plan', extensions: ['json'] }],
+    buttonLabel: 'Save plan',
+  });
+  if (result.canceled || !result.filePath) return { canceled: true };
+  const filePath = result.filePath;
+  const saved = { id: randomUUID(), name: path.basename(filePath, path.extname(filePath)), savedAt: new Date().toISOString(), data };
+  const temporaryPath = `${filePath}.${randomUUID()}.tmp`;
+  try {
+    await fs.promises.writeFile(temporaryPath, JSON.stringify(saved, null, 2), { encoding: 'utf8', flag: 'wx' });
+    await fs.promises.rename(temporaryPath, filePath);
+  } catch (error) {
+    await fs.promises.rm(temporaryPath, { force: true }).catch(() => {});
+    throw error;
+  }
+  return { canceled: false, name: saved.name, filePath };
+});
 
 ipcMain.handle('check-for-updates', async () => {
   let release;

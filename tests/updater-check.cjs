@@ -9,14 +9,16 @@ const { PassThrough } = require('node:stream');
 const source = fs.readFileSync(path.join(__dirname, '../electron/main.cjs'), 'utf8');
 const url = 'https://github.com/itsTyger1/fire_Calc/releases/download/v1.2.1/FIRE-Projector-Setup-1.2.1.exe';
 
-function updater(t, { status = 200, release = {}, spawnError = false, downloadError = false } = {}) {
+function updater(t, { status = 200, release = {}, spawnError = false, downloadError = false, cancelSave = false, invalidFolder = false } = {}) {
   const handlers = {};
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'fire-updater-test-'));
   t.after(() => fs.rmSync(folder, { recursive: true, force: true }));
   let quit = false;
-  const app = { getVersion: () => '1.1.1', whenReady: () => new Promise(() => {}), on() {}, quit() { quit = true; } };
+  const app = { getPath: () => folder, getVersion: () => '1.1.1', whenReady: () => new Promise(() => {}), on() {}, quit() { quit = true; } };
+  const filePath = path.join(folder, ...(invalidFolder ? ['missing'] : []), 'My retirement plan.json');
+  let dialogOptions;
   const mocks = {
-    electron: { app, ipcMain: { handle: (name, fn) => { handlers[name] = fn; } }, Menu: { setApplicationMenu() {} } },
+    electron: { app, BrowserWindow: { fromWebContents: () => null }, dialog: { showSaveDialog: async (_parent, options) => { dialogOptions = options; return { canceled: cancelSave, filePath }; } }, ipcMain: { handle: (name, fn) => { handlers[name] = fn; } }, Menu: { setApplicationMenu() {} } },
     'node:os': { tmpdir: () => folder },
     'node:https': { get(address, options, callback) {
       const request = new EventEmitter();
@@ -40,7 +42,7 @@ function updater(t, { status = 200, release = {}, spawnError = false, downloadEr
     } },
   };
   vm.runInNewContext(source, { require: (name) => mocks[name] ?? require(name), process, __dirname: path.join(__dirname, '../electron'), URL });
-  return { check: () => handlers['check-for-updates'](), install: (address = url) => handlers['download-and-install-update']({}, address), quit: () => quit, folder };
+  return { check: () => handlers['check-for-updates'](), install: (address = url) => handlers['download-and-install-update']({}, address), save: (data) => handlers['save-plan-file']({}, 'My FIRE plan', data), dialogOptions: () => dialogOptions, filePath, quit: () => quit, folder };
 }
 
 test('an existing 1.1.1 app detects the automated release', async (t) => {
@@ -74,4 +76,36 @@ test('successful installer launch closes the app', async (t) => {
   const app = updater(t);
   assert.equal((await app.install()).started, true);
   assert.equal(app.quit(), true);
+});
+
+const plan = { version: 1, profile: { retirementAge: 50 }, accounts: [], phases: [], scenarios: [], budget: [] };
+test('Save As writes the complete named plan and returns the chosen location', async (t) => {
+  const app = updater(t);
+  const result = await app.save(plan);
+  assert.equal(result.canceled, false);
+  assert.equal(result.filePath, app.filePath);
+  assert.equal(result.name, 'My retirement plan');
+  const saved = JSON.parse(fs.readFileSync(app.filePath, 'utf8'));
+  assert.deepEqual(saved.data, plan);
+  assert.equal(saved.name, result.name);
+  assert.ok(saved.id && saved.savedAt);
+  assert.equal(app.dialogOptions().defaultPath, path.join(app.folder, 'My FIRE plan.json'));
+  await app.save({ ...plan, profile: { retirementAge: 55 } });
+  assert.equal(JSON.parse(fs.readFileSync(app.filePath, 'utf8')).data.profile.retirementAge, 55);
+  assert.deepEqual(fs.readdirSync(app.folder), ['My retirement plan.json']);
+});
+test('canceling Save As writes nothing', async (t) => {
+  const app = updater(t, { cancelSave: true });
+  assert.equal((await app.save(plan)).canceled, true);
+  assert.deepEqual(fs.readdirSync(app.folder), []);
+});
+test('save failures are reported without claiming success', async (t) => {
+  const app = updater(t, { invalidFolder: true });
+  await assert.rejects(app.save(plan), /ENOENT/);
+  assert.deepEqual(fs.readdirSync(app.folder), []);
+});
+test('invalid plan data is rejected before opening Save As', async (t) => {
+  const app = updater(t);
+  await assert.rejects(app.save({}), /Invalid plan data/);
+  assert.equal(app.dialogOptions(), undefined);
 });

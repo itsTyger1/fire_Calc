@@ -442,6 +442,9 @@ select option { color: #e6f0f2; background: #0b252f; }
 .update-modal h2 { margin: 0 0 10px; font: 800 25px/1.12 'Manrope', sans-serif; letter-spacing: -.035em; }
 .update-modal p { color: #a9bdc3; margin: 0; line-height: 1.55; }
 .update-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; }
+.save-confirmation { color: inherit; }
+.save-confirmation::backdrop { background: rgba(3, 14, 19, .78); backdrop-filter: blur(5px); }
+.save-confirmation .save-location { margin-top: 12px; overflow-wrap: anywhere; color: #e5f3f4; user-select: text; }
 .toast { position: fixed; z-index: 80; bottom: 24px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 7px; color: #062019; background: var(--green); padding: 10px 15px; border-radius: 8px; box-shadow: 0 10px 35px rgba(0,0,0,.35); font-size: 11px; font-weight: 800; }
 .fatal { min-height: 100vh; display: grid; place-content: center; justify-items: center; gap: 12px; }
 

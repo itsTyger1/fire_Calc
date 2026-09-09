@@ -1,5 +1,5 @@
 // UI regression checks against the built app, using a disposable Electron profile.
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -7,8 +7,15 @@ const assert = require('node:assert/strict');
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'fire-projector-test-'));
 app.setPath('userData', profile);
 app.disableHardwareAcceleration();
+let saveOutcome = 'success';
+ipcMain.handle('save-plan-file', async (_event, _name, data) => {
+  assert.equal(data.version, 1);
+  if (saveOutcome === 'cancel') return { canceled: true };
+  if (saveOutcome === 'error') throw new Error('Test save failure');
+  return { canceled: false, name: 'Retirement test', filePath: path.join(profile, 'Retirement test.json') };
+});
 app.whenReady().then(async () => {
-  const window = new BrowserWindow({ show: false, width: 1450, height: 1050, webPreferences: { partition: 'ui-smoke', contextIsolation: true, nodeIntegration: false } });
+  const window = new BrowserWindow({ show: false, width: 1450, height: 1050, webPreferences: { partition: 'ui-smoke', contextIsolation: true, nodeIntegration: false, preload: path.join(__dirname, '../electron/preload.cjs') } });
   const evaluate = async (fn, ...args) => {
     const result = await window.webContents.executeJavaScript(`(() => { try { return { value: (${fn.toString()})(...${JSON.stringify(args)}) }; } catch (error) { return { error: error.stack || error.message }; } })()`);
     if (result.error) throw new Error(result.error);
@@ -109,6 +116,22 @@ app.whenReady().then(async () => {
     assert.equal(await inputValue('Taxable Brokerage monthly contribution'), '1000');
     await window.webContents.reload(); await wait();
     assert.equal(await inputValue('Taxable Brokerage monthly contribution'), '1000');
+    const clickSave = async () => { await evaluate(() => [...document.querySelectorAll('.top-actions button')].find((el) => el.textContent.trim() === 'Save').click()); await wait(); };
+    await clickSave();
+    assert.equal(await evaluate(() => document.querySelector('.save-confirmation')?.open), true);
+    assert.equal(await evaluate(() => document.querySelector('.save-location').textContent), path.join(profile, 'Retirement test.json'));
+    await evaluate(() => document.querySelector('.save-confirmation button').click()); await wait();
+    await edit('Taxable Brokerage monthly contribution', 777);
+    await evaluate(() => { const button = [...document.querySelectorAll('.top-actions button')].find((el) => el.textContent.trim() === 'Load'); button.focus(); button.click(); }); await wait();
+    await evaluate(() => document.querySelector('.load-menu-item').click()); await wait();
+    assert.equal(await inputValue('Taxable Brokerage monthly contribution'), '1000');
+    saveOutcome = 'cancel';
+    await clickSave();
+    assert.equal(await evaluate(() => Boolean(document.querySelector('.save-confirmation'))), false);
+    saveOutcome = 'error';
+    await clickSave();
+    assert.match(await evaluate(() => document.querySelector('.toast')?.textContent), /Test save failure/);
+    assert.equal(await evaluate(() => Boolean(document.querySelector('.save-confirmation'))), false);
     window.setSize(1050, 900); await wait(); await capture('monthly-money-small');
     assert.equal(await evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
     assert.equal(errors.length, 0, errors.join('\n'));
