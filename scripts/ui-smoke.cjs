@@ -9,11 +9,27 @@ app.setPath('userData', profile);
 app.disableHardwareAcceleration();
 app.whenReady().then(async () => {
   const window = new BrowserWindow({ show: false, width: 1450, height: 1050, webPreferences: { partition: 'ui-smoke', contextIsolation: true, nodeIntegration: false } });
-  const evaluate = (fn, ...args) => window.webContents.executeJavaScript(`(${fn.toString()})(...${JSON.stringify(args)})`);
+  const evaluate = async (fn, ...args) => {
+    const result = await window.webContents.executeJavaScript(`(() => { try { return { value: (${fn.toString()})(...${JSON.stringify(args)}) }; } catch (error) { return { error: error.stack || error.message }; } })()`);
+    if (result.error) throw new Error(result.error);
+    return result.value;
+  };
   const wait = () => new Promise((resolve) => setTimeout(resolve, 700));
   const errors = [];
   window.webContents.on('console-message', (event) => { if (event.level === 'error') errors.push(event.message); });
   const select = async (label, value) => {
+    if (label === 'Scenario you’re editing') {
+      await evaluate(() => document.querySelector('[role="combobox"]').click());
+      await wait();
+      await evaluate((id) => {
+        const names = { base: 'Base FIRE at 50', conservative: 'Conservative returns' };
+        const option = [...document.querySelectorAll('#scenario-options [role="option"]')].find((el) => el.querySelector('span')?.textContent === names[id]);
+        if (!option) throw new Error(`Missing scenario: ${id}`);
+        option.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      }, value);
+      await wait();
+      return;
+    }
     await evaluate((label, value) => {
       const el = [...document.querySelectorAll('label')].find((el) => el.textContent.includes(label))?.querySelector('select');
       if (!el) throw new Error(`Missing select: ${label}`);
@@ -74,14 +90,15 @@ app.whenReady().then(async () => {
     assert.equal(await inputValue('Taxable Brokerage monthly contribution'), '1000');
     assert.equal(await inputValue('HYSA / Cash monthly contribution'), '250');
     assert.match(await remainder(), /372/);
-    await select('Scenario you’re editing', 'higher');
+    await select('Scenario you’re editing', 'conservative');
+    assert.equal(await inputValue('Taxable Brokerage monthly contribution'), '850');
+    await edit('Taxable Brokerage monthly contribution', 1342);
     assert.equal(await inputValue('Taxable Brokerage monthly contribution'), '1342');
     await tab('plan');
-    assert.equal(await inputValue('Expected real return'), '5');
-    await select('Scenario you’re editing', 'conservative');
-    assert.equal(await inputValue('Expected real return'), '4');
-    await edit('Expected real return', 4.5);
-    assert.equal(await inputValue('Expected real return'), '4.5');
+    assert.equal(await inputValue('Expected nominal return'), '6.6');
+    await edit('Expected nominal return', 7);
+    assert.equal(await inputValue('Expected nominal return'), '7');
+    assert.equal(await inputValue('Expected real return · calculated'), '4.39');
     await capture('plan');
     await tab('accounts');
     await evaluate(() => document.querySelector('.account-summary').click()); await wait();

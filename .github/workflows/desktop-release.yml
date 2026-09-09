@@ -1,0 +1,49 @@
+name: Desktop release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Assign an increasing desktop version
+        shell: pwsh
+        run: |
+          $version = "1.2.$env:GITHUB_RUN_NUMBER"
+          npm version $version --no-git-tag-version
+          "DESKTOP_VERSION=$version" >> $env:GITHUB_ENV
+      - run: npm test
+      - run: npm run build:desktop -- --publish never
+      - run: npm run test:ui
+      - name: Publish installer after verification
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "v$env:DESKTOP_VERSION"
+          $installer = "release/FIRE-Projector-Setup-$env:DESKTOP_VERSION.exe"
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --target $env:GITHUB_SHA --title "FIRE Projector $env:DESKTOP_VERSION" --generate-notes --draft
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          gh release upload $tag $installer --clobber
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          gh release edit $tag --draft=false --latest

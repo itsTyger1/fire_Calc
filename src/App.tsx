@@ -85,7 +85,7 @@ export default function App() {
     try {
       const result = await window.fireUpdater.check();
       setUpdate(result);
-      if (result.noPublishedRelease) setToast('No published update is available yet');
+      if (result.noPublishedRelease) setToast('No desktop release is available yet. Repository changes must finish building before they can be installed.');
       else if (!result.updateAvailable) setToast(`You’re up to date (${result.currentVersion})`);
       else if (!result.downloadUrl) setToast(`Version ${result.latestVersion} is available, but no installer was published`);
       else setUpdatePromptOpen(true);
@@ -99,6 +99,7 @@ export default function App() {
     setInstallingUpdate(true);
     setToast('Downloading update…');
     try {
+      saveData(data);
       const result = await window.fireUpdater.install(downloadUrl);
       if (!result.started) setToast('Update canceled');
     } catch (error) { setToast(error instanceof Error ? error.message : 'Update failed'); }

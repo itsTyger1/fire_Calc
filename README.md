@@ -20,7 +20,13 @@ The take-home formula uses the configured deposited income and all personal non-
 
 401(k) payroll and employer contributions are not deducted again because they are already withheld or paid separately. Gross income remains supported in imported data but has no input because it does not affect the calculation.
 
-## Development
+## Desktop updates
+
+**Check updates** downloads the latest published Windows installer from this repository's GitHub Releases. Every push to `main` runs `.github/workflows/desktop-release.yml`: it tests and builds the app, then publishes the installer. Allow the workflow to finish before checking in the app. Releases use increasing `1.2.<workflow run number>` versions so existing 1.1.1 installations detect the update, even when the source package version has not changed.
+
+Choose **Update now** to download and launch the installer. The app closes only after the installer starts. Complete the installation and reopen FIRE Projector; your locally saved plans are retained. Source commits become desktop updates after packaging succeeds. A failed build leaves the previous release available. The workflow can also be run manually from GitHub Actions.
+
+## Local development
 
 Use a Node.js version compatible with the locked Vite and Electron packages.
 
