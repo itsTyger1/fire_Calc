@@ -8,12 +8,15 @@ const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'fire-projector-test-'));
 app.setPath('userData', profile);
 app.disableHardwareAcceleration();
 let saveOutcome = 'success';
+let savedPlan;
 ipcMain.handle('save-plan-file', async (_event, _name, data) => {
   assert.equal(data.version, 1);
   if (saveOutcome === 'cancel') return { canceled: true };
   if (saveOutcome === 'error') throw new Error('Test save failure');
+  savedPlan = { id: 'ui-smoke-save', name: 'Retirement test', savedAt: new Date().toISOString(), data };
   return { canceled: false, name: 'Retirement test', filePath: path.join(profile, 'Retirement test.json') };
 });
+ipcMain.handle('list-plan-files', async () => savedPlan ? [savedPlan] : []);
 app.whenReady().then(async () => {
   const window = new BrowserWindow({ show: false, width: 1450, height: 1050, webPreferences: { partition: 'ui-smoke', contextIsolation: true, nodeIntegration: false, preload: path.join(__dirname, '../electron/preload.cjs') } });
   const evaluate = async (fn, ...args) => {
