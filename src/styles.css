@@ -112,6 +112,16 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .brand strong { font: 800 17px 'Manrope', sans-serif; letter-spacing: -.02em; }
 .brand small { color: var(--muted); font-size: 11px; }
 .top-actions { display: flex; gap: 5px; }
+.load-menu { position: relative; }
+.load-menu-panel { position: absolute; top: calc(100% + 10px); right: 0; z-index: 40; width: min(330px, calc(100vw - 32px)); padding: 9px; border: 1px solid #34545d; border-radius: 12px; background: #0c2731; box-shadow: 0 20px 50px #0008; }
+.load-menu-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 5px 7px 9px; border-bottom: 1px solid #1a3a45; }
+.load-menu-heading strong { font-size: 12px; }
+.load-menu-heading small, .load-menu-item small { color: var(--muted); font-size: 10px; }
+.load-menu-item { width: 100%; display: block; padding: 9px 7px; border: 0; border-radius: 7px; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.load-menu-item:hover { background: #153b42; }
+.load-menu-item > span { display: grid; gap: 3px; min-width: 0; }
+.load-menu-item strong { overflow: hidden; color: #e8f1f3; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.load-menu-empty { margin: 0; padding: 12px 7px 8px; color: var(--muted); font-size: 11px; }
 .button { border: 0; border-radius: 9px; padding: 9px 13px; font-weight: 700; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer; transition: .2s ease; white-space: nowrap; }
 .button:hover { transform: translateY(-1px); }
 .button.primary { color: #062019; background: var(--green); }

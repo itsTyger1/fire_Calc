@@ -57,9 +57,10 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": "always",
+      "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "FIRE Projector"
+      "shortcutName": "FIRE Projector",
+      "include": "build/installer.nsh"
     }
   },
   "description": "A private desktop FIRE planner with consolidated inputs and scenario comparisons"

@@ -1,9 +1,9 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, CircleDollarSign, Download, Flame, Gauge, Landmark, RefreshCcw, Upload } from 'lucide-react';
+import { Check, CircleDollarSign, Flame, FolderOpen, Gauge, Landmark, RefreshCcw, Save } from 'lucide-react';
 import type { AppData } from './domain/types';
 import { defaultData } from './domain/defaults';
 import { projectScenario, scenarioBudgetMetrics } from './domain/calculations';
-import { downloadData, loadData, readImport, resetData, saveData } from './lib/persistence';
+import { listSavedPlans, loadData, resetData, saveData, saveNamedPlan, type SavedPlan } from './lib/persistence';
 import { InputHub } from './components/InputHub';
 import { BudgetSummary } from './components/BudgetSummary';
 import { Analytics, BridgeAndEmergency, monthStatus, RetirementDrawdown, Sensitivity, SummaryTable, TimelineChart } from './components/Results';
@@ -20,7 +20,9 @@ export default function App() {
   const [installingUpdate, setInstallingUpdate] = useState(false);
   const [updatePromptOpen, setUpdatePromptOpen] = useState(false);
   const [requestedPhaseId, setPhaseId] = useState<string>();
-  const importRef = useRef<HTMLInputElement>(null);
+  const [savedPlans, setSavedPlans] = useState<SavedPlan[]>(() => listSavedPlans());
+  const [loadMenuOpen, setLoadMenuOpen] = useState(false);
+  const loadMenuRef = useRef<HTMLDivElement>(null);
   // Keep controlled inputs responsive while projection and chart updates are
   // calculated in React's lower-priority render pass.
   const projectionData = useDeferredValue(data);
@@ -40,8 +42,39 @@ export default function App() {
 
   useEffect(() => { const timeout = window.setTimeout(() => saveData(data), 350); return () => window.clearTimeout(timeout); }, [data]);
   useEffect(() => { if (toast) { const timeout = window.setTimeout(() => setToast(null), 2600); return () => window.clearTimeout(timeout); } }, [toast]);
+  useEffect(() => {
+    if (!loadMenuOpen) return;
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (loadMenuRef.current && !loadMenuRef.current.contains(event.target as Node)) setLoadMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', closeOnOutsideClick);
+    return () => document.removeEventListener('pointerdown', closeOnOutsideClick);
+  }, [loadMenuOpen]);
 
-  const handleImport = async (file?: File) => { if (!file) return; try { const next = await readImport(file); setData(next); setSelected(next.scenarios[0]?.id ?? ''); setToast('Plan imported successfully'); } catch (error) { setToast(error instanceof Error ? error.message : 'Import failed'); } };
+  const handleSave = () => {
+    const requestedName = window.prompt('Save this plan as:', selectedScenario?.name ?? 'My FIRE plan');
+    if (requestedName == null) return;
+    const name = requestedName.trim();
+    if (!name) { setToast('Enter a name to save this plan'); return; }
+    const existing = listSavedPlans().find((plan) => plan.name.toLocaleLowerCase() === name.toLocaleLowerCase());
+    if (existing && !window.confirm(`A save named “${existing.name}” already exists. Replace it?`)) return;
+    try {
+      saveNamedPlan(name, data);
+      setSavedPlans(listSavedPlans());
+      setToast(`Saved “${name}”`);
+    } catch (error) { setToast(error instanceof Error ? error.message : 'Could not save this plan'); }
+  };
+  const handleToggleLoadMenu = () => {
+    if (!loadMenuOpen) setSavedPlans(listSavedPlans());
+    setLoadMenuOpen((open) => !open);
+  };
+  const handleLoad = (saved: SavedPlan) => {
+    const next = clone(saved.data);
+    setData(next);
+    setSelected(next.scenarios[0]?.id ?? '');
+    setLoadMenuOpen(false);
+    setToast(`Loaded “${saved.name}”`);
+  };
   const handleReset = () => { if (!window.confirm('Are you sure you want to reset the entire planner to its seeded defaults?')) return; const next = resetData(); setData(next); setSelected(next.scenarios[0].id); setToast('Planner reset'); };
   const handleRefresh = () => window.location.reload();
   const handleUpdate = async () => {
@@ -87,7 +120,7 @@ export default function App() {
         ? `${money(contributionDifference)}/mo above amount needed`
         : `${money(-contributionDifference)}/mo more needed`;
   return <div className="app-shell">
-    <header className="topbar"><div className="brand"><span><Flame size={19} /></span><div><strong>FIRE Projector</strong><small>{data.profile.mode === 'real' ? 'Today’s dollars' : 'Future nominal dollars'}</small></div></div><div className="top-actions"><button className="button ghost" onClick={() => downloadData(data)}><Download size={16} /> <span>Export</span></button><button className="button ghost" onClick={() => importRef.current?.click()}><Upload size={16} /> <span>Import</span></button><button className="button ghost" onClick={handleRefresh}><RefreshCcw size={16} /> <span>Refresh app</span></button><button className="button ghost" onClick={handleUpdate} disabled={checkingUpdate || installingUpdate}><RefreshCcw size={16} /> <span>{checkingUpdate ? 'Checking…' : installingUpdate ? 'Downloading…' : 'Check updates'}</span></button><button className="button danger" onClick={handleReset}><RefreshCcw size={16} /> <span>Reset</span></button><input ref={importRef} type="file" accept="application/json" hidden onChange={(e) => void handleImport(e.target.files?.[0])} /></div></header>
+    <header className="topbar"><div className="brand"><span><Flame size={19} /></span><div><strong>FIRE Projector</strong><small>{data.profile.mode === 'real' ? 'Today’s dollars' : 'Future nominal dollars'}</small></div></div><div className="top-actions"><button className="button ghost" onClick={handleSave}><Save size={16} /> <span>Save</span></button><div className="load-menu" ref={loadMenuRef}><button className="button ghost" onClick={handleToggleLoadMenu} aria-haspopup="menu" aria-expanded={loadMenuOpen}><FolderOpen size={16} /> <span>Load</span></button>{loadMenuOpen && <div className="load-menu-panel" role="menu" aria-label="Saved plans"><div className="load-menu-heading"><strong>Saved plans</strong><small>{savedPlans.length ? `${savedPlans.length} saved ${savedPlans.length === 1 ? 'plan' : 'plans'}` : 'No saves yet'}</small></div>{savedPlans.length ? savedPlans.map((saved) => <button key={saved.id} className="load-menu-item" role="menuitem" onClick={() => handleLoad(saved)}><span><strong>{saved.name}</strong><small>Saved {new Date(saved.savedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}</small></span></button>) : <p className="load-menu-empty">Use Save to create a named plan.</p>}</div>}</div><button className="button ghost" onClick={handleRefresh}><RefreshCcw size={16} /> <span>Refresh app</span></button><button className="button ghost" onClick={handleUpdate} disabled={checkingUpdate || installingUpdate}><RefreshCcw size={16} /> <span>{checkingUpdate ? 'Checking…' : installingUpdate ? 'Downloading…' : 'Check updates'}</span></button><button className="button danger" onClick={handleReset}><RefreshCcw size={16} /> <span>Reset</span></button></div></header>
 
     <main className="workspace">
       <InputHub data={data} setData={setData} scenario={selectedScenario} setSelected={setSelected} phaseId={fireInvestingPhaseId} setPhaseId={setPhaseId} />

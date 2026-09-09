@@ -3,7 +3,15 @@ import { nominalReturnFromReal, realReturnFromNominal } from '../domain/calculat
 import type { AppData } from '../domain/types';
 
 const STORAGE_KEY = 'fire-projector-v1';
+const SAVES_KEY = 'fire-projector-saves-v1';
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+
+export interface SavedPlan {
+  id: string;
+  name: string;
+  savedAt: string;
+  data: AppData;
+}
 const legacyStarterScenarios = [
   { id: 'base', name: 'Base FIRE at 50', overrides: {} },
   { id: 'conservative', name: 'Conservative returns', overrides: { nominalReturn: 0.066 } },
@@ -61,20 +69,51 @@ export const loadData = (): AppData => {
 export const saveData = (data: AppData) => localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 export const resetData = () => clone(defaultData);
 
-export const downloadData = (data: AppData) => {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = `fire-projector-${new Date().toISOString().slice(0, 10)}.json`;
-  anchor.click();
-  URL.revokeObjectURL(url);
+const isAppData = (value: unknown): value is AppData => {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<AppData>;
+  return candidate.version === 1
+    && Boolean(candidate.profile)
+    && Array.isArray(candidate.accounts)
+    && Array.isArray(candidate.phases)
+    && Array.isArray(candidate.scenarios)
+    && Array.isArray(candidate.budget);
 };
 
-export const readImport = async (file: File): Promise<AppData> => {
-  const parsed = JSON.parse(await file.text()) as AppData;
-  if (parsed.version !== 1 || !parsed.profile || !Array.isArray(parsed.accounts) || !Array.isArray(parsed.scenarios)) {
-    throw new Error('This file is not a valid FIRE Projector v1 export.');
+const createSaveId = () => typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+  ? crypto.randomUUID()
+  : `save-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+const writeSavedPlans = (plans: SavedPlan[]) => localStorage.setItem(SAVES_KEY, JSON.stringify(plans));
+
+export const listSavedPlans = (): SavedPlan[] => {
+  try {
+    const raw = localStorage.getItem(SAVES_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((value): SavedPlan[] => {
+      if (!value || typeof value !== 'object') return [];
+      const candidate = value as Partial<SavedPlan>;
+      if (typeof candidate.id !== 'string' || typeof candidate.name !== 'string' || !candidate.name.trim() || typeof candidate.savedAt !== 'string' || !isAppData(candidate.data)) return [];
+      return [{ id: candidate.id, name: candidate.name.trim(), savedAt: candidate.savedAt, data: normalizeData(candidate.data) }];
+    }).sort((left, right) => right.savedAt.localeCompare(left.savedAt));
+  } catch {
+    return [];
   }
-  return normalizeData(parsed);
+};
+
+export const saveNamedPlan = (name: string, data: AppData): SavedPlan => {
+  const cleanName = name.trim();
+  if (!cleanName) throw new Error('Give this save a name.');
+  const plans = listSavedPlans();
+  const existing = plans.find((plan) => plan.name.toLocaleLowerCase() === cleanName.toLocaleLowerCase());
+  const saved: SavedPlan = {
+    id: existing?.id ?? createSaveId(),
+    name: cleanName,
+    savedAt: new Date().toISOString(),
+    data: clone(data),
+  };
+  writeSavedPlans(existing ? plans.map((plan) => plan.id === existing.id ? saved : plan) : [saved, ...plans]);
+  return saved;
 };

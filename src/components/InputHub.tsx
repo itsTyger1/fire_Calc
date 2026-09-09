@@ -151,7 +151,7 @@ function ContributionsEditor({ data, setData, scenario, phaseId, setPhaseId }: {
       } },
     } } : item),
   }));
-  if (!phase) return <p className="muted">Import a plan with a contribution phase to edit monthly contributions.</p>;
+  if (!phase) return <p className="muted">Add a contribution phase to edit monthly contributions.</p>;
   const trigger = phase.startsWhen;
   const triggerText = trigger.kind === 'always' ? 'Starts immediately' : trigger.kind === 'cashTarget' ? `Starts when ${data.accounts.find((account) => account.id === trigger.accountId)?.name ?? 'cash'} reaches ${money(trigger.amount)}` : trigger.kind === 'age' ? `Starts at age ${trigger.age}` : `Starts on ${trigger.date}`;
   return <div className="editor-stack">

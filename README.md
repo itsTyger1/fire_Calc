@@ -1,6 +1,6 @@
 # FIRE Projector
 
-A private Windows desktop planner built with Electron, React, and TypeScript. Your plan is saved locally; Export and Import move a plan between computers. Version 1.1 keeps the existing saved-plan format.
+A private Windows desktop planner built with Electron, React, and TypeScript. Your plan is saved locally; Save and Load keep named plan snapshots on this computer. Version 1.1 keeps the existing saved-plan format.
 
 ## Using the app
 
