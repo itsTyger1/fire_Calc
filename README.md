@@ -6,7 +6,7 @@ In the desktop app, **Save** opens Windows **Save As** in the app’s writable `
 
 ## Using the app
 
-Run `release/FIRE-Projector-Setup-1.1.1.exe`. Close an older running version before installing.
+Run `release/FIRE-Projector-Setup-<version>.exe`. Close an older running version before installing.
 
 All editable settings are in the input area at the top:
 
@@ -24,9 +24,9 @@ The take-home formula uses the configured deposited income and all personal non-
 
 ## Desktop updates
 
-**Check updates** downloads the latest published Windows installer from this repository's GitHub Releases. Every push to `main` runs `.github/workflows/desktop-release.yml`: it tests and builds the app, then publishes the installer. Allow the workflow to finish before checking in the app. Releases use increasing `1.2.<workflow run number>` versions so existing 1.1.1 installations detect the update, even when the source package version has not changed.
+**Check updates** downloads the latest published Windows installer from this repository's GitHub Releases. Releases are created only when an explicit semantic-version tag such as `v1.2.5` is pushed. The release workflow checks that the tag version matches `package.json` and that the tag points to the exact current `main` commit before it builds or publishes anything. This keeps the source for a release, the tag, and the installer aligned.
 
-Choose **Update now** to download and launch the installer. The app closes only after the installer starts. Complete the installation and reopen FIRE Projector; your locally saved plans are retained. Source commits become desktop updates after packaging succeeds. A failed build leaves the previous release available. The workflow can also be run manually from GitHub Actions.
+Choose **Update now** to download and launch the installer. The app closes only after the installer starts. Complete the installation and reopen FIRE Projector; your locally saved plans are retained. Source commits become desktop updates after a version tag is published successfully. A failed build leaves the previous release available. The workflow can also be rerun manually for an existing tag while that tag is still the current `main` commit. See [PUSHING.md](PUSHING.md) for the exact push and release commands.
 
 ## Local development
 
@@ -40,7 +40,7 @@ npm run dev:desktop
 The development desktop window uses Vite hot reload. Keep it open while editing;
 renderer changes appear automatically, and **Refresh app** reloads the current
 development bundle without reinstalling anything. Use the packaged installer
-workflow below for final releases.
+workflow described in [PUSHING.md](PUSHING.md) for final releases.
 
 `npm run dev` runs only the web UI. Dependencies are pinned and `package-lock.json` is committed so installation is reproducible.
 

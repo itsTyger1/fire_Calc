@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { defaultData } from '../src/domain/defaults';
 import {
   aggregateAccounts, annualToMonthlyRate, applyScenarioOverrides, calculateFireNumber,
-  emergencyFundMetrics, findFireCrossing, growAccountOneMonth, projectCore,
+  bridgeMetrics, emergencyFundMetrics, findFireCrossing, growAccountOneMonth, projectCore,
   projectScenario, resolvePhase, scenarioBudgetMetrics, solveRequiredAdditionalContribution,
   solveRequiredContributionScale, nominalReturnFromReal, realReturnFromNominal,
 } from '../src/domain/calculations';
@@ -12,6 +12,37 @@ const profile = { ...defaultData.profile, currentAge: 30, retirementAge: 31, max
 const account: Account = { ...defaultData.accounts[3], id: 'test', balance: 10000, monthlyContribution: 100, employerContribution: 50, fireEligible: true };
 
 describe('financial calculations', () => {
+  it('does not report a hypothetical crossing when planned retirement depletes the portfolio', () => {
+    const data = structuredClone(defaultData);
+    data.profile = { ...profile, retirementAge: 31, maxAge: 40, customFireNumber: 20000 };
+    data.accounts = [{ ...account, balance: 10000, annualReturn: 0, monthlyContribution: 500, employerContribution: 0 }];
+    data.phases = [];
+    const scenario = { ...data.scenarios[0], overrides: {} };
+    expect(findFireCrossing(projectCore({ profile: data.profile, accounts: data.accounts, phases: [] }))).not.toBeNull();
+    const result = projectScenario(data, scenario);
+    expect(result.firePoint).toBeNull();
+    expect(result.retirementSummary.depletionPoint).not.toBeNull();
+    expect(bridgeMetrics(result).usesTargetAge).toBe(true);
+    expect(bridgeMetrics(result).years).toBe(28.5);
+  });
+  it('starts the bridge at an earlier FIRE crossing and handles access at 59.5', () => {
+    const data = structuredClone(defaultData);
+    data.profile = { ...profile, retirementAge: 55, maxAge: 60, customFireNumber: 10000, mode: 'real' };
+    data.accounts = [{ ...account, balance: 10000, annualReturn: 0 }];
+    data.phases = [];
+    const result = projectScenario(data, { ...data.scenarios[0], overrides: {} });
+    expect(result.firePoint).toEqual(result.points[0]);
+    expect(bridgeMetrics(result)).toMatchObject({ startAge: 30, years: 29.5, need: 354000, usesTargetAge: false });
+    const later = { ...result, firePoint: { ...result.points[0], age: 59.5 } };
+    expect(bridgeMetrics(later).need).toBe(0);
+    expect(bridgeMetrics(later).years).toBe(0);
+  });
+  it('inflates each bridge month in nominal mode', () => {
+    const result = projectScenario(defaultData, defaultData.scenarios[0]);
+    const testResult = { ...result, profile: { ...result.profile, annualSpending: 12000, mode: 'nominal' as const, inflationRate: 0.12 }, firePoint: { ...result.points[0], age: 59.25, month: 12 } };
+    const expected = [12, 13, 14].reduce((sum, month) => sum + 1000 * Math.pow(1.12, month / 12), 0);
+    expect(bridgeMetrics(testResult).need).toBeCloseTo(expected);
+  });
   it('calculates the FIRE number', () => expect(calculateFireNumber(52500, 0.035)).toBeCloseTo(1500000));
   it('keeps real and nominal returns consistent with inflation', () => {
     expect(nominalReturnFromReal(0.05, 0.025)).toBeCloseTo(0.07625, 10);

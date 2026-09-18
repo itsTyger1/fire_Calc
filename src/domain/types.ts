@@ -2,7 +2,7 @@ export type ProjectionMode = 'real' | 'nominal';
 export type TaxTreatment = 'Roth' | 'Traditional' | 'Taxable' | 'Cash' | 'Other';
 export type Accessibility = 'Immediate' | 'Potential' | 'Restricted';
 export type AccountType =
-  | 'Roth 401(k)' | 'Traditional 401(k)' | 'Roth IRA' | 'Traditional IRA'
+  | 'Roth 401(k)' | 'Traditional 401(k)' | 'After-tax 401(k)' | 'Roth IRA' | 'Traditional IRA'
   | 'Taxable Brokerage' | 'HYSA / Cash' | 'Treasury / Bonds' | 'Crypto' | 'HSA' | 'Other';
 export type AssetClass = 'Broad US equity' | 'International equity' | 'Bonds' | 'Cash' | 'Bitcoin / Crypto' | 'Individual stock' | 'Other';
 
@@ -23,6 +23,7 @@ export interface Account {
   accessibility: Accessibility;
   notes: string;
   holdings: Holding[];
+  afterTaxBasis?: number;
 }
 
 export type PhaseTrigger =
@@ -42,6 +43,30 @@ export interface ContributionPhase {
 
 export interface BudgetItem { id: string; name: string; category: 'Needs' | 'Wants'; amount: number }
 
+export interface RothTransfer {
+  id: string;
+  kind: 'conversion' | 'backdoor' | 'roth401k' | 'mega-ira' | 'mega-plan';
+  age: number;
+  sourceId: string;
+  destinationId: string;
+  amount: number;
+  // For conversions: verified nontaxable portion. For Roth 401(k): contribution basis.
+  basis: number;
+  taxRate: number;
+  taxAccountId: string;
+  repeat?: 'once' | 'monthly' | 'annual';
+  endAge?: number;
+  fullBalance?: boolean;
+  earningsDestinationId?: string;
+}
+
+export interface RothConversionLot { year: number; taxable: number; nontaxable: number }
+export interface RothTransferResult {
+  id: string; date: string; requested: number; transferred: number;
+  taxable: number; tax: number; taxPaid: number; accessYear: number | null; warning?: string;
+  nontaxable?: number; pretaxRollover?: number; rothAmount?: number;
+}
+
 export interface Profile {
   name: string;
   currentAge: number;
@@ -55,6 +80,8 @@ export interface Profile {
   mode: ProjectionMode;
   maxAge: number;
   rothContributionBasis: number;
+  rothTransfers?: RothTransfer[];
+  rothConversionHistory?: RothConversionLot[];
   emergencyTarget: number;
   normalMonthlySpending: number;
   jobLossMonthlySpending: number;
@@ -65,6 +92,7 @@ export interface Profile {
 }
 
 export interface ScenarioOverrides {
+  rothTransfers?: RothTransfer[];
   currentAge?: number;
   retirementAge?: number;
   annualSpending?: number;
@@ -138,6 +166,11 @@ export interface ProjectionPoint {
   monthlyWithdrawal: number;
   cumulativeWithdrawals: number;
   cumulativeWithdrawalShortfall: number;
+  rothAccessibleBasis: number;
+  cumulativeConversionTax: number;
+  cumulativeConversionTaxPaid: number;
+  rothTransfers: RothTransferResult[];
+  afterTaxBases: Record<string, number>;
 }
 
 export interface RetirementSummary {

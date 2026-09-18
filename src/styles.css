@@ -520,3 +520,12 @@ select option { color: #e6f0f2; background: #0b252f; }
   .account-chart-note { flex-direction: column; gap: 4px; }
   .comparison-title { align-items: flex-start; flex-direction: column; }
 }
+
+.input-panel .budget-row.budget-row-basic, .budget-row.budget-row-basic { grid-template-columns: minmax(0, 1fr) 130px; align-items: center; }
+.budget-row-basic .mini-money { grid-column: 2; }
+.sensitivity-group span { flex-basis: 80px; }
+.sensitivity-group small { color: #a9bac0; font-size: 10px; }
+
+.roth-editor > .editor-stack { padding-top: 16px; }
+.roth-transfer { border: 1px solid #21424d; border-radius: 10px; padding: 16px; }
+.roth-editor a { color: #65a7ff; }

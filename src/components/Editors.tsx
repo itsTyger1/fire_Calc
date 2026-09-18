@@ -5,7 +5,7 @@ import { CommittedNumberInput, Field, SelectField, TextField, Toggle, money, per
 import { applyScenarioOverrides } from '../domain/calculations';
 
 type Setter = Dispatch<SetStateAction<AppData>>;
-const accountTypes: AccountType[] = ['Roth 401(k)', 'Traditional 401(k)', 'Roth IRA', 'Traditional IRA', 'Taxable Brokerage', 'HYSA / Cash', 'Treasury / Bonds', 'Crypto', 'HSA', 'Other'];
+const accountTypes: AccountType[] = ['Roth 401(k)', 'Traditional 401(k)', 'After-tax 401(k)', 'Roth IRA', 'Traditional IRA', 'Taxable Brokerage', 'HYSA / Cash', 'Treasury / Bonds', 'Crypto', 'HSA', 'Other'];
 const assetClasses: AssetClass[] = ['Broad US equity', 'International equity', 'Bonds', 'Cash', 'Bitcoin / Crypto', 'Individual stock', 'Other'];
 const percentageInput = (rate: number) => Math.round(rate * 10000) / 100;
 
@@ -49,7 +49,7 @@ export function ProfileEditor({ data, setData, scenario }: { data: AppData; setD
       <Field label="Expected nominal return" value={percentageInput(p.nominalReturn)} min={-99} step={0.1} suffix="%" onChange={(v) => updateReturnAssumption('nominalReturn', v / 100)} hint="Editable market-return assumption. Real return = (1 + nominal return) ÷ (1 + inflation) − 1. For example, 7% nominal with 2.5% inflation produces 4.39% real." />
       <Field label="Expected real return · calculated" value={percentageInput(p.realReturn)} min={-99} step={0.1} suffix="%" onChange={() => undefined} readOnly hint="Calculated automatically as (1 + nominal return) ÷ (1 + inflation) − 1. It is rounded to two decimal places for display." />
       <Field label="Inflation rate" value={percentageInput(p.inflationRate)} min={-99} step={0.1} suffix="%" onChange={(v) => updateReturnAssumption('inflationRate', v / 100)} hint="Changing inflation recalculates the real return while keeping the nominal return unchanged." />
-      <Field label="Roth IRA contribution basis · shared" value={p.rothContributionBasis} min={0} step={500} prefix="$" onChange={(v) => update('rothContributionBasis', Math.max(0, v))} hint="Enter regular contributions only—not the full balance or earnings." />
+      <Field label="Roth IRA contribution basis · shared" value={p.rothContributionBasis} min={0} step={500} prefix="$" onChange={(v) => update('rothContributionBasis', Math.max(0, v))} hint="Enter regular contributions only—not earnings, rollovers, or conversions. Enter conversions and rollovers separately under Accounts → Roth conversions, backdoors & rollovers." />
     </div>
     <p className="return-assumption-note">Nominal return is the editable market-return assumption. Real return updates automatically from nominal return and inflation. Projection dollars only controls how results and spending are displayed.</p>
   </div>;
@@ -65,7 +65,7 @@ export function AccountsEditor({ data, setData }: { data: AppData; setData: Sett
   const add = () => { const account = newAccount(); setData((old) => ({ ...old, accounts: [...old.accounts, account], phases: old.phases.map((phase) => ({ ...phase, contributions: { ...phase.contributions, [account.id]: { personal: 0, employer: 0 } } })) })); setExpanded(account.id); };
   const returnModeFor = (account: Account) => account.returnMode ?? (account.type === 'Crypto' ? 'plan' : account.annualReturn === undefined ? 'plan' : 'custom');
 
-  return <div className="account-list">
+  return <div className="account-list"><p className="muted">Growth uses the scenario return or your custom account return. Account type does not automatically change return, tax treatment, accessibility, or FIRE eligibility. Tax treatment is descriptive. Scheduled Roth transfers below can estimate conversion tax; other taxes and account-specific withdrawal restrictions are not simulated.</p>
     {data.accounts.map((account, index) => <div className={`account-editor ${expanded === account.id ? 'expanded' : ''}`} key={account.id}>
       <button className="account-summary" onClick={() => setExpanded(expanded === account.id ? null : account.id)}>
         <span className="account-icon">{account.name.slice(0, 2).toUpperCase()}</span><span><strong>{account.name}</strong><small>{account.type} · {account.fireEligible ? 'FIRE eligible' : 'Net worth only'}</small></span><b>{money(account.balance)}</b>
@@ -73,8 +73,9 @@ export function AccountsEditor({ data, setData }: { data: AppData; setData: Sett
       {expanded === account.id && <div className="account-body">
         <div className="editor-grid">
           <TextField label="Account name" value={account.name} onChange={(v) => updateAccount(account.id, { name: v })} />
-          <SelectField label="Account type" value={account.type} onChange={(v) => updateAccount(account.id, { type: v as AccountType })}>{accountTypes.map((v) => <option key={v}>{v}</option>)}</SelectField>
+          <SelectField label="Account type" value={account.type} onChange={(v) => updateAccount(account.id, { type: v as AccountType, ...(v === 'After-tax 401(k)' ? { afterTaxBasis: account.afterTaxBasis ?? 0, accessibility: 'Restricted' as const } : {}) })}>{accountTypes.map((v) => <option key={v}>{v}</option>)}</SelectField>
           <Field label="Current balance" value={account.balance} min={0} prefix="$" step={100} onChange={(v) => updateAccount(account.id, { balance: Math.max(0, v) })} />
+          {account.type === 'After-tax 401(k)' && <Field label="Current after-tax contribution basis" value={account.afterTaxBasis ?? 0} min={0} prefix="$" onChange={(afterTaxBasis) => updateAccount(account.id, { afterTaxBasis })} hint="Unrecovered employee after-tax contributions in this subaccount, excluding earnings. Zero for a new account. Enter this once before scheduling mega-backdoor transfers." />}
           <SelectField label="Projected return" value={returnModeFor(account)} onChange={(value) => updateAccount(account.id, value === 'plan' ? { returnMode: 'plan' } : { returnMode: 'custom', annualReturn: account.annualReturn ?? (data.profile.mode === 'real' ? data.profile.realReturn : data.profile.nominalReturn) })}><option value="plan">Use scenario return</option><option value="custom">Use custom return</option></SelectField>
           {returnModeFor(account) === 'custom' && <Field label="Custom annual return" value={(account.annualReturn ?? (data.profile.mode === 'real' ? data.profile.realReturn : data.profile.nominalReturn)) * 100} min={-99} suffix="%" step={0.1} onChange={(v) => updateAccount(account.id, { returnMode: 'custom', annualReturn: v / 100 })} hint="This account will use this rate instead of the selected scenario’s return." />}
           <SelectField label="Tax treatment" value={account.taxTreatment} onChange={(v) => updateAccount(account.id, { taxTreatment: v as TaxTreatment })}>{['Roth', 'Traditional', 'Taxable', 'Cash', 'Other'].map((v) => <option key={v}>{v}</option>)}</SelectField>
@@ -97,6 +98,7 @@ export function AccountsEditor({ data, setData }: { data: AppData; setData: Sett
 }
 
 export function BudgetEditor({ data, setData, scenario, budget }: { data: AppData; setData: Setter; scenario: Scenario; budget: ScenarioBudgetMetrics }) {
+  const [advanced, setAdvanced] = useState(false);
   const updatePhaseIncome = (takeHomeIncome: number) => setData((old) => ({
     ...old,
     phases: old.phases.map((phase) => phase.id === budget.phase.id ? { ...phase, takeHomeIncome } : phase),
@@ -125,10 +127,12 @@ export function BudgetEditor({ data, setData, scenario, budget }: { data: AppDat
     { label: 'Savings & investments', amount: budget.takeHomeContributions },
   ];
   return <div className="editor-stack">
+    <div className="segmented" role="group" aria-label="Income and expenses detail"><button aria-pressed={!advanced} className={!advanced ? 'active' : ''} onClick={() => setAdvanced(false)}>Basic</button><button aria-pressed={advanced} className={advanced ? 'active' : ''} onClick={() => setAdvanced(true)}>Advanced</button></div>
+    <p className="muted">1. Enter your monthly deposited pay. 2. Fill in monthly expenses below. 3. Assign savings and investments on the right, then check the unassigned amount above.</p>
     <div className="editor-grid"><Field label={`Deposited take-home · ${budget.phase.name}`} value={budget.takeHomeIncome} prefix="$" min={0} onChange={updatePhaseIncome} hint="The amount that reaches your bank account after payroll deductions during the selected contribution phase. Each phase saves its own amount." /></div>
-    <p className="scenario-budget-note">Expense amounts apply to this scenario. Names and categories are shared.</p>
-    <div className="budget-items">{data.budget.map((item) => { const amount = scenario.overrides.budgetAmounts?.[item.id] ?? item.amount; return <div className="budget-row" key={item.id}><input aria-label={`${item.name} expense name`} value={item.name} onChange={(e) => setData((old) => ({ ...old, budget: old.budget.map((b) => b.id === item.id ? { ...b, name: e.target.value } : b) }))} /><select aria-label={`${item.name} category`} value={item.category} onChange={(e) => setData((old) => ({ ...old, budget: old.budget.map((b) => b.id === item.id ? { ...b, category: e.target.value as 'Needs' | 'Wants' } : b) }))}><option>Needs</option><option>Wants</option></select><span className="mini-money">$<CommittedNumberInput ariaLabel={`${item.name} monthly expense`} min={0} value={amount} onCommit={(value) => updateScenarioAmount(item.id, value)} /></span><button className="icon-button danger" onClick={() => removeBudgetItem(item.id)}><Trash2 size={15} /></button></div>; })}</div>
-    <button className="add-card" onClick={() => setData((old) => ({ ...old, budget: [...old.budget, { id: crypto.randomUUID(), name: 'New expense', category: 'Needs', amount: 0 }] }))}><Plus size={18} /> Add budget item</button>
-    <div className="budget-ratios" aria-label="Budget ratios"><div className="budget-ratios-heading"><strong>Budget ratios</strong><span>Calculated from deposited take-home · read-only</span></div>{budgetRatios.map(({ label, amount }) => <div className="budget-ratio" key={label}><span>{label}</span><strong>{percent(ratio(amount))}</strong><small>{money(amount)} / month</small></div>)}</div>
+    <p className="scenario-budget-note">Expense amounts apply to this scenario. Income applies to this phase across all scenarios. Advanced lets you rename, categorize, add, or remove expenses; switching views keeps all amounts.</p>
+    <div className="budget-items">{data.budget.map((item) => { const amount = scenario.overrides.budgetAmounts?.[item.id] ?? item.amount; return <div className={`budget-row ${advanced ? '' : 'budget-row-basic'}`} key={item.id}>{advanced ? <><input aria-label={`${item.name} expense name`} value={item.name} onChange={(e) => setData((old) => ({ ...old, budget: old.budget.map((b) => b.id === item.id ? { ...b, name: e.target.value } : b) }))} /><select aria-label={`${item.name} category`} value={item.category} onChange={(e) => setData((old) => ({ ...old, budget: old.budget.map((b) => b.id === item.id ? { ...b, category: e.target.value as 'Needs' | 'Wants' } : b) }))}><option>Needs</option><option>Wants</option></select></> : <span>{item.name}</span>}<span className="mini-money">$<CommittedNumberInput ariaLabel={`${item.name} monthly expense`} min={0} value={amount} onCommit={(value) => updateScenarioAmount(item.id, value)} /></span>{advanced && <button className="icon-button danger" aria-label={`Remove ${item.name}`} onClick={() => removeBudgetItem(item.id)}><Trash2 size={15} /></button>}</div>; })}</div>
+    {advanced && <button className="add-card" onClick={() => setData((old) => ({ ...old, budget: [...old.budget, { id: crypto.randomUUID(), name: 'New expense', category: 'Needs', amount: 0 }] }))}><Plus size={18} /> Add budget item</button>}
+    {advanced && <div className="budget-ratios" aria-label="Budget ratios"><div className="budget-ratios-heading"><strong>Budget ratios</strong><span>Calculated from deposited take-home · read-only</span></div>{budgetRatios.map(({ label, amount }) => <div className="budget-ratio" key={label}><span>{label}</span><strong>{percent(ratio(amount))}</strong><small>{money(amount)} / month</small></div>)}</div>}
   </div>;
 }

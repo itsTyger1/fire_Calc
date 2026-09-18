@@ -1,7 +1,8 @@
 import type {
   Account, AppData, ContributionAmount, ContributionPhase, Profile, ProjectionPoint,
-  Scenario, ScenarioBudgetMetrics, ScenarioResult,
+  Scenario, ScenarioBudgetMetrics, ScenarioResult, RothConversionLot, RothTransferResult,
 } from './types';
+import { accessibleConversionBasis, addConversionLot, consumeRothBasis, isMegaBackdoor, rothTransferError } from './roth';
 
 const safe = (value: number, fallback = 0) => Number.isFinite(value) ? value : fallback;
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, safe(value, min)));
@@ -50,6 +51,7 @@ export const applyScenarioOverrides = (data: AppData, scenario: Scenario) => {
   const accounts = clone(data.accounts);
   const phases = clone(data.phases);
   const overrides = scenario.overrides;
+  if (overrides.rothTransfers) profile.rothTransfers = clone(overrides.rothTransfers);
 
   for (const key of ['currentAge', 'retirementAge', 'annualSpending', 'withdrawalRate', 'realReturn', 'nominalReturn', 'inflationRate'] as const) {
     if (overrides[key] !== undefined) (profile[key] as number) = overrides[key] as number;
@@ -115,9 +117,9 @@ const totalsFor = (accounts: Account[], balances: Record<string, number>, rothBa
     if (account.fireEligible) firePortfolio += balance;
     if (account.includeInNetWorth) netWorth += balance;
     if (account.type === 'HYSA / Cash') cash += balance;
-    if (account.includeInNetWorth && account.accessibility === 'Immediate') accessible += balance;
+    if (account.includeInNetWorth && account.accessibility === 'Immediate' && account.type !== 'Roth IRA' && !account.type.includes('401(k)')) accessible += balance;
   }
-  const rothBalance = accounts.filter((account) => account.type === 'Roth IRA' && account.includeInNetWorth && account.accessibility !== 'Immediate')
+  const rothBalance = accounts.filter((account) => account.type === 'Roth IRA' && account.includeInNetWorth)
     .reduce((sum, account) => sum + (balances[account.id] ?? 0), 0);
   accessible += Math.min(rothBalance, Math.max(0, rothBasis));
   return { firePortfolio, netWorth, accessible, cash };
@@ -172,6 +174,18 @@ export const projectCore = ({ profile, accounts, phases, extraMonthlyContributio
   let employerContributions = 0;
   let cumulativeWithdrawals = 0;
   let cumulativeWithdrawalShortfall = 0;
+  let cumulativeConversionTax = 0;
+  let cumulativeConversionTaxPaid = 0;
+  let fireTransferAdjustment = 0;
+  const conversionLots: RothConversionLot[] = [];
+  const afterTaxBases = Object.fromEntries(accounts.filter((account) => account.type === 'After-tax 401(k)').map((account) => [account.id, Math.max(0, safe(account.afterTaxBasis ?? 0))]));
+  const inPlanTaxYears: Record<string, number[]> = {};
+  for (const lot of profile.rothConversionHistory ?? []) {
+    if (Number.isInteger(lot.year) && lot.year <= start.getFullYear() && lot.year >= 1998
+      && Number.isFinite(lot.taxable) && Number.isFinite(lot.nontaxable)) {
+      addConversionLot(conversionLots, lot.year, Math.max(0, lot.taxable), Math.max(0, lot.nontaxable));
+    }
+  }
   const points: ProjectionPoint[] = [];
   const extraAccount = accounts.find((account) => account.fireEligible && account.type === 'Taxable Brokerage')
     ?? accounts.find((account) => account.fireEligible);
@@ -179,8 +193,60 @@ export const projectCore = ({ profile, accounts, phases, extraMonthlyContributio
   for (let month = 0; month <= totalMonths; month += 1) {
     const age = profile.currentAge + month / 12;
     const date = dateAtMonth(start, month);
+    const year = Number(date.slice(0, 4));
+    const rothTransfers: RothTransferResult[] = [];
+    for (const transfer of profile.rothTransfers ?? []) {
+      if (transfer.age < profile.currentAge || transfer.age > maxAge) continue;
+      const firstMonth = Math.round((transfer.age - profile.currentAge) * 12);
+      const repeat = transfer.repeat ?? 'once';
+      if (month < firstMonth) continue;
+      if (month !== firstMonth && (repeat === 'once'
+        || month > Math.round(((transfer.endAge ?? transfer.age) - profile.currentAge) * 12)
+        || (repeat === 'annual' && (month - firstMonth) % 12 !== 0))) continue;
+      const mega = isMegaBackdoor(transfer);
+      const recentInPlan = transfer.kind === 'roth401k' && age < 59.5 && (inPlanTaxYears[transfer.sourceId] ?? []).some((conversionYear) => year < conversionYear + 5);
+      const error = rothTransferError(transfer, accounts) ?? (recentInPlan ? 'This Roth 401(k) contains a recent taxable in-plan conversion. Its subsequent IRA rollover during the recapture period is not modeled; transfer skipped.' : undefined);
+      if (error) {
+        rothTransfers.push({ id: transfer.id, date, requested: transfer.amount, transferred: 0, taxable: 0, tax: 0, taxPaid: 0, accessYear: null, warning: error });
+        continue;
+      }
+      const source = accounts.find((account) => account.id === transfer.sourceId)!;
+      const destination = accounts.find((account) => account.id === transfer.destinationId)!;
+      const requested = mega && transfer.fullBalance ? balances[source.id] : transfer.amount;
+      const amount = Math.min(requested, balances[source.id]);
+      if (mega && transfer.fullBalance && amount === 0) continue;
+      const proportionalBasis = mega && balances[source.id] > 0 ? afterTaxBases[source.id] * amount / balances[source.id] : 0;
+      const basis = mega ? Math.min(amount, proportionalBasis) : transfer.basis * amount / transfer.amount;
+      const earningsDestination = mega && transfer.earningsDestinationId ? accounts.find((account) => account.id === transfer.earningsDestinationId) : undefined;
+      const pretaxRollover = earningsDestination ? amount - basis : 0;
+      const rothAmount = amount - pretaxRollover;
+      const taxable = transfer.kind === 'roth401k' ? 0 : rothAmount - basis;
+      const tax = taxable * transfer.taxRate;
+      const taxAccount = accounts.find((account) => account.id === transfer.taxAccountId);
+      const taxPaid = Math.min(tax, taxAccount ? balances[taxAccount.id] : 0);
+      balances[source.id] -= amount;
+      balances[destination.id] += rothAmount;
+      if (mega) afterTaxBases[source.id] = Math.max(0, afterTaxBases[source.id] - proportionalBasis);
+      if (earningsDestination) balances[earningsDestination.id] += pretaxRollover;
+      if (taxAccount) balances[taxAccount.id] -= taxPaid;
+      fireTransferAdjustment += rothAmount * Number(destination.fireEligible) + pretaxRollover * Number(earningsDestination?.fireEligible ?? false) - amount * Number(source.fireEligible)
+        - (taxAccount?.fireEligible ? taxPaid : 0);
+      cumulativeConversionTax += tax;
+      cumulativeConversionTaxPaid += taxPaid;
+      if (transfer.kind === 'roth401k') rothBasis += basis;
+      else if (transfer.kind === 'mega-plan') {
+        if (taxable > 0) (inPlanTaxYears[destination.id] ??= []).push(year);
+      }
+      else addConversionLot(conversionLots, year, taxable, basis);
+      const warnings = [];
+      if (amount < requested) warnings.push('Source balance is insufficient; transfer was capped.');
+      if (taxPaid < tax) warnings.push('Tax funding is insufficient; unpaid tax is not deducted from other accounts.');
+      rothTransfers.push({ id: transfer.id, date, requested, transferred: amount, taxable, tax, taxPaid, nontaxable: basis, pretaxRollover, rothAmount,
+        accessYear: taxable > 0 ? year + 5 : null, warning: warnings.join(' ') || undefined });
+    }
     const phase = resolvePhase(phases, balances, age, date);
-    const totals = totalsFor(accounts, balances, rothBasis);
+    const rothAccessibleBasis = rothBasis + accessibleConversionBasis(conversionLots, year, age);
+    const totals = totalsFor(accounts, balances, rothAccessibleBasis);
     const years = month / 12;
     const fireTarget = profile.mode === 'nominal' ? baseFireNumber * Math.pow(1 + profile.inflationRate, years) : baseFireNumber;
     const inRetirement = includeRetirement && month >= retirementStartMonth;
@@ -188,16 +254,25 @@ export const projectCore = ({ profile, accounts, phases, extraMonthlyContributio
     points.push({
       month, age, date, fireTarget, ...totals, balances: { ...balances }, phaseName: inRetirement ? 'Retirement drawdown' : phase?.name ?? 'Base contributions',
       startingPrincipal, personalContributions, employerContributions,
-      investmentGrowth: totals.firePortfolio - startingPrincipal - personalContributions - employerContributions + cumulativeWithdrawals,
+      investmentGrowth: totals.firePortfolio - startingPrincipal - personalContributions - employerContributions + cumulativeWithdrawals - fireTransferAdjustment,
       projectionPhase: inRetirement ? 'retirement' : 'accumulation',
       monthlyWithdrawal,
       cumulativeWithdrawals,
       cumulativeWithdrawalShortfall,
+      rothAccessibleBasis, cumulativeConversionTax, cumulativeConversionTaxPaid, rothTransfers,
+      afterTaxBases: { ...afterTaxBases },
     });
     if (month === totalMonths) break;
 
     if (inRetirement) {
+      const balancesBeforeWithdrawal = { ...balances };
+      const rothBefore = accounts.filter((account) => account.type === 'Roth IRA').reduce((sum, account) => sum + balances[account.id], 0);
       const withdrawal = withdrawFromFirePortfolio(accounts, balances, monthlyWithdrawal);
+      const rothAfter = accounts.filter((account) => account.type === 'Roth IRA').reduce((sum, account) => sum + balances[account.id], 0);
+      for (const id of Object.keys(afterTaxBases)) {
+        if (balancesBeforeWithdrawal[id] > 0) afterTaxBases[id] *= balances[id] / balancesBeforeWithdrawal[id];
+      }
+      rothBasis = consumeRothBasis(rothBasis, conversionLots, Math.max(0, rothBefore - rothAfter));
       cumulativeWithdrawals += withdrawal.actual;
       cumulativeWithdrawalShortfall += withdrawal.shortfall;
       accounts.forEach((account) => {
@@ -215,7 +290,8 @@ export const projectCore = ({ profile, accounts, phases, extraMonthlyContributio
       const scaledPersonal = isScalableFireAccount(account) ? planned.personal * Math.max(0, fireContributionScale) : planned.personal;
       const personal = Math.max(0, scaledPersonal + extra);
       const employer = Math.max(0, planned.employer);
-      if (account.type === 'Roth IRA' && account.includeInNetWorth && account.accessibility !== 'Immediate') rothBasis += personal;
+      if (account.type === 'Roth IRA') rothBasis += personal;
+      if (account.type === 'After-tax 401(k)') afterTaxBases[account.id] += personal;
       balances[account.id] = (Math.max(0, balances[account.id]) + personal + employer) * (1 + monthlyRates[account.id]);
       if (account.fireEligible) {
         personalContributions += personal;
@@ -272,9 +348,8 @@ export const solveRequiredContributionScale = (
 
 export const projectScenario = (data: AppData, scenario: Scenario): ScenarioResult => {
   const { profile, accounts, phases } = applyScenarioOverrides(data, scenario);
-  const accumulationPoints = projectCore({ profile, accounts, phases });
   const points = projectCore({ profile, accounts, phases, includeRetirement: true });
-  const firePoint = findFireCrossing(accumulationPoints);
+  const firePoint = findFireCrossing(points);
   const targetMonth = clamp(Math.round((profile.retirementAge - profile.currentAge) * 12), 0, points.length - 1);
   const targetPoint = points[targetMonth];
   const current = points[0];
@@ -316,6 +391,18 @@ export const projectScenario = (data: AppData, scenario: Scenario): ScenarioResu
     contributionGap: Number.isFinite(requiredPersonalMonthly) ? requiredPersonalMonthly - plannedPersonalMonthly : Infinity,
     retirementSummary,
   };
+};
+
+export const bridgeMetrics = (result: ScenarioResult) => {
+  const point = result.firePoint ?? result.targetPoint;
+  const years = Math.max(0, 59.5 - point.age);
+  // Sum spending in the same dollar mode as the projected accessible balance.
+  let need = 0;
+  for (let month = 0; month < Math.ceil(years * 12); month += 1) {
+    need += monthlyRetirementWithdrawal(result.profile, point.month + month)
+      * Math.min(1, years * 12 - month);
+  }
+  return { startAge: point.age, years, need, accessible: point.accessible, usesTargetAge: !result.firePoint };
 };
 
 export const aggregateAccounts = (accounts: Account[]) => accounts.reduce((totals, account) => ({

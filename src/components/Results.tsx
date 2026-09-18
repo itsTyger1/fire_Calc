@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, ComposedChart, Legend, Line, LineChart, Pie, PieChart, ReferenceDot, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { AppData, Scenario, ScenarioResult } from '../domain/types';
 import { scenarioColors } from '../domain/defaults';
-import { allocationByClass, applyScenarioOverrides, emergencyFundMetrics, nominalReturnFromReal, projectCore, scenarioBudgetMetrics } from '../domain/calculations';
+import { allocationByClass, applyScenarioOverrides, bridgeMetrics, findFireCrossing, emergencyFundMetrics, nominalReturnFromReal, projectCore, scenarioBudgetMetrics } from '../domain/calculations';
 import { age, money, percent, Section } from './ui';
 const allocationColors = ['#37d39a', '#65a7ff', '#f4b860', '#ad7bff', '#ff718d', '#40c7d9', '#8191a1'];
 
@@ -45,7 +45,12 @@ export function TimelineChart({ results, selected, onSelect }: { results: Scenar
   const chartData = useMemo(() => {
     if (!first) return [];
     const rows: ChartDatum[] = [];
-    for (let month = 0; month <= maxMonth; month += 3) {
+    const months = new Set<number>();
+    for (let month = 0; month <= maxMonth; month += 3) months.add(month);
+    visible.forEach((result) => {
+      if (result.firePoint && result.firePoint.month <= maxMonth) months.add(result.firePoint.month);
+    });
+    for (const month of [...months].sort((a, b) => a - b)) {
       const point = first.points[Math.min(month, first.points.length - 1)];
       const date = new Date(point.date);
       const row: ChartDatum = { month, age: point.age, year: date.getFullYear() + date.getMonth() / 12, date: point.date };
@@ -59,7 +64,7 @@ export function TimelineChart({ results, selected, onSelect }: { results: Scenar
       rows.push(row);
     }
     return rows;
-  }, [first, maxMonth, visible.map((r) => r.scenario.id + r.points.length).join('|')]);
+  }, [results, maxMonth]);
   const tooltip = ({ active, payload, label }: { active?: boolean; payload?: ReadonlyArray<TimelineTooltipItem>; label?: number | string }) => {
     const portfolioPayload = payload?.filter((item) => visible.some((result) => result.scenario.id === String(item.dataKey))) ?? [];
     if (!active || !portfolioPayload.length) return null;
@@ -145,7 +150,7 @@ export function RetirementDrawdown({ result }: { result: ScenarioResult }) {
     <div className={`drawdown-callout ${depleted ? 'negative' : 'positive'}`}>
       <div>
         <strong>{depleted ? `Projected depletion at age ${summary.depletionPoint!.age.toFixed(1)}` : `Projected to last through age ${endingPoint.age.toFixed(1)}`}</strong>
-        <p>Contributions stop at age {summary.startAge.toFixed(1)}. {targetMethod} Planned withdrawals {withdrawalMode}; this baseline uses deterministic returns and does not model taxes or account withdrawal order.</p>
+        <p>Contributions stop at age {summary.startAge.toFixed(1)}. {targetMethod} Planned withdrawals {withdrawalMode}; this baseline uses deterministic returns and proportional withdrawals. Scheduled Roth conversion taxes are included; other taxes and penalty-free withdrawal order are not modeled.</p>
       </div>
     </div>
     <div className="mini-metrics drawdown-metrics">
@@ -155,6 +160,9 @@ export function RetirementDrawdown({ result }: { result: ScenarioResult }) {
       <div><span>Balance at max age</span><strong>{money(summary.endingBalance)}</strong></div>
       <div><span>Lowest projected balance</span><strong>{money(summary.lowestBalance)}</strong></div>
     </div>
+    {endingPoint.cumulativeConversionTax > 0 && <p className="muted">Scheduled conversion taxes: {money(endingPoint.cumulativeConversionTax)} estimated · {money(endingPoint.cumulativeConversionTaxPaid)} funded from selected accounts.</p>}
+    {endingPoint.cumulativeConversionTax > endingPoint.cumulativeConversionTaxPaid && <p className="drawdown-warning">{money(endingPoint.cumulativeConversionTax - endingPoint.cumulativeConversionTaxPaid)} of conversion tax is unfunded. Balances do not deduct that unpaid amount.</p>}
+    {result.points.some((point) => point.rothTransfers.some((transfer) => transfer.warning)) && <p className="drawdown-warning">Some Roth transfers could not be fully applied. Review transfer details under Accounts.</p>}
     {summary.totalWithdrawalShortfall > 0 && <p className="drawdown-warning">{money(summary.totalWithdrawalShortfall)} of planned withdrawals could not be funded after the FIRE portfolio reached $0.</p>}
   </Section>;
 }
@@ -184,33 +192,35 @@ export function Analytics({ result, data }: { result: ScenarioResult; data: AppD
 }
 
 export function BridgeAndEmergency({ result, data }: { result: ScenarioResult; data: AppData }) {
-  const firePoint = result.firePoint;
-  const fireAge = firePoint?.age ?? result.profile.retirementAge;
-  const bridgeYears = Math.max(0, 59.5 - fireAge);
-  const bridgeNeed = bridgeYears * result.profile.annualSpending;
-  const accessible = firePoint?.accessible ?? result.targetPoint.accessible;
+  const { startAge, years: bridgeYears, need: bridgeNeed, accessible, usesTargetAge } = bridgeMetrics(result);
   const currentBudget = scenarioBudgetMetrics(data, result.scenario);
   const cashAccount = result.accounts.find((a) => a.type === 'HYSA / Cash');
   const phase = currentBudget.phase;
   const cashSavings = cashAccount ? (phase?.contributions[cashAccount.id]?.personal ?? cashAccount.monthlyContribution) : 0;
   const emergency = emergencyFundMetrics(cashAccount?.balance ?? 0, result.profile.emergencyTarget, cashSavings, data.profile.normalMonthlySpending, data.profile.jobLossMonthlySpending);
   return <div className="bridge-grid">
-    <Section title="Early retirement bridge" eyebrow="Access before 59½"><div className="bridge-callout"><div className={`bridge-ring ${accessible >= bridgeNeed ? 'good' : 'warn'}`}><strong>{percent(Math.min(1, accessible / Math.max(1, bridgeNeed)), 0)}</strong><small>funded</small></div><div><h3>{accessible >= bridgeNeed ? 'Your estimated bridge is covered' : `${money(bridgeNeed - accessible)} bridge gap`}</h3><p>{money(accessible)} accessible against an estimated {money(bridgeNeed)} needed for {bridgeYears.toFixed(1)} years.</p></div></div><div className="mini-metrics"><div><span>Accessible at FIRE</span><strong>{money(accessible)}</strong></div><div><span>Annual spending</span><strong>{money(result.profile.annualSpending)}</strong></div><div><span>Bridge years</span><strong>{bridgeYears.toFixed(1)}</strong></div></div><p className="fine-print">How it’s calculated: immediate-access account balances, plus the lesser of your non-immediate Roth IRA balance and your Roth IRA contribution basis (including projected personal contributions). Traditional IRA and 401(k) balances are excluded because they generally have access restrictions before 59½. This is a planning estimate; tax and withdrawal rules may change.</p></Section>
+    <Section title="Early retirement bridge" eyebrow="Access before 59½"><p className="muted">{usesTargetAge ? `FIRE is not reached in this projection. This estimate uses your planned retirement age ${startAge.toFixed(1)}; it does not mean retirement is funded.` : `If you retire at projected FIRE age ${startAge.toFixed(1)}, the bridge runs from that age to 59½. The main chart still starts withdrawals at your chosen retirement age.`}</p><div className="bridge-callout"><div className={`bridge-ring ${accessible >= bridgeNeed ? 'good' : 'warn'}`}><strong>{percent(bridgeNeed === 0 ? 1 : Math.min(1, accessible / bridgeNeed), 0)}</strong><small>funded</small></div><div><h3>{bridgeYears === 0 ? 'No bridge needed before 59½' : accessible >= bridgeNeed ? 'Your estimated bridge is covered' : `${money(bridgeNeed - accessible)} bridge gap`}</h3><p>{money(accessible)} accessible against an estimated {money(bridgeNeed)} needed for {bridgeYears.toFixed(1)} years.</p></div></div><div className="mini-metrics"><div><span>{usesTargetAge ? 'Accessible at target age' : 'Accessible at FIRE'}</span><strong>{money(accessible)}</strong></div><div><span>Annual spending</span><strong>{money(result.profile.annualSpending)}</strong></div><div><span>Bridge years</span><strong>{bridgeYears.toFixed(1)}</strong></div></div><p className="fine-print">How it’s calculated: immediate-access account balances, plus available Roth IRA basis, capped at included Roth IRA balances. Regular contributions come first, followed by conversion principal in tax-year order (taxable before nontaxable). Taxable conversions become available after five tax years or at age 59½. Only accounts included in net worth count here. 401(k) balances remain restricted. Accessibility settings control other accounts; Roth IRA access always uses tracked basis. Spending is summed through 59½, with inflation in future-dollar mode; scheduled conversions and funded conversion taxes affect balances. This is an access snapshot at the start of the bridge, not a simulation of annual ladder withdrawals; later conversion unlocks and bridge investment returns are not included in the coverage percentage.</p></Section>
     <Section title="Emergency fund" eyebrow="Cash runway"><p className="muted">Cash target: {money(result.profile.emergencyTarget)} · Normal spending: {money(data.profile.normalMonthlySpending)}/mo · Job-loss spending: {money(data.profile.jobLossMonthlySpending)}/mo</p><div className="mini-metrics"><div><span>Normal runway</span><strong>{emergency.normalRunway.toFixed(1)} mo</strong></div><div><span>Job-loss runway</span><strong>{emergency.jobLossRunway.toFixed(1)} mo</strong></div><div><span>Target ETA</span><strong>{Number.isFinite(emergency.monthsToTarget) ? `${emergency.monthsToTarget} mo` : 'No savings'}</strong></div></div><div className="progress"><span style={{ width: `${Math.min(100, (cashAccount?.balance ?? 0) / Math.max(1, result.profile.emergencyTarget) * 100)}%` }} /></div><small className="muted">{money(emergency.remaining)} remaining · {money(cashSavings)}/mo current cash savings</small></Section>
   </div>;
 }
 
 export function Sensitivity({ data, selectedScenario }: { data: AppData; selectedScenario: Scenario }) {
-  const fireAgeFor = (scenario: Scenario) => {
-    const { profile, accounts, phases } = applyScenarioOverrides(data, scenario);
-    const crossing = projectCore({ profile, accounts, phases }).find((p) => p.firePortfolio >= p.fireTarget);
-    return crossing?.age;
-  };
-  const selectedProfile = applyScenarioOverrides(data, selectedScenario).profile;
-  const returns = [.03, .04, .05, .06, .07].map((value) => ({ label: percent(value, 0), age: fireAgeFor({ ...selectedScenario, overrides: { ...selectedScenario.overrides, nominalReturn: nominalReturnFromReal(value, selectedProfile.inflationRate) } }) }));
-  const contributions = [-1000, -500, -250, 0, 250, 500, 1000].map((delta) => { const current = selectedScenario.overrides.contributionScale ?? 1; const base = Math.max(1, data.phases.at(-1) ? Object.values(data.phases.at(-1)!.contributions).reduce((s, v) => s + v.personal, 0) : 1); return { label: delta === 0 ? 'Base' : `${delta > 0 ? '+' : '−'}${money(Math.abs(delta))}`, age: fireAgeFor({ ...selectedScenario, overrides: { ...selectedScenario.overrides, contributionScale: Math.max(0, current + delta / base) } }) }; });
-  const spending = [-.2, -.1, 0, .1, .2].map((delta) => ({ label: delta === 0 ? 'Base' : `${delta > 0 ? '+' : ''}${percent(delta, 0)}`, age: fireAgeFor({ ...selectedScenario, overrides: { ...selectedScenario.overrides, annualSpending: (selectedScenario.overrides.annualSpending ?? data.profile.annualSpending) * (1 + delta) } }) }));
-  const rates = [.03, .0325, .035, .0375, .04].map((value) => ({ label: percent(value, value % .01 ? 2 : 1), age: fireAgeFor({ ...selectedScenario, overrides: { ...selectedScenario.overrides, withdrawalRate: value } }) }));
-  const group = (title: string, items: { label: string; age?: number }[]) => <div className="sensitivity-group"><strong>{title}</strong><div>{items.map((item) => <span key={item.label}><small>{item.label}</small><b>{item.age ? item.age.toFixed(1) : '—'}</b></span>)}</div></div>;
-  return <Section title="Sensitivity explorer" eyebrow="One assumption at a time"><p className="muted">Resulting FIRE age for <strong>{selectedScenario.name}</strong>. Each row changes only the labeled assumption.</p><div className="sensitivity-grid">{group('Real return', returns)}{group('Monthly contribution', contributions)}{group('Annual spending', spending)}{group('Withdrawal rate', rates)}</div></Section>;
+  const { profile, accounts, phases } = applyScenarioOverrides(data, selectedScenario);
+  const fireAgeFor = (settings: Parameters<typeof projectCore>[0]) => findFireCrossing(projectCore(settings))?.age;
+  const base = { profile, accounts, phases };
+  const baselineAge = fireAgeFor(base);
+  const returns = [.03, .04, .05, .06, .07].map((value) => ({ label: percent(value, 0), age: fireAgeFor({ ...base, profile: { ...profile, realReturn: value, nominalReturn: nominalReturnFromReal(value, profile.inflationRate) } }) }));
+  const extraAccount = accounts.find((account) => account.fireEligible && account.type === 'Taxable Brokerage') ?? accounts.find((account) => account.fireEligible);
+  const contributions = [0, 250, 500, 1000].map((extra) => ({ label: extra === 0 ? 'Current' : `+${money(extra)}/mo`, age: fireAgeFor({ ...base, extraMonthlyContribution: extra }) }));
+  const spending = [-.2, -.1, 0, .1, .2].map((delta) => ({ label: money(profile.annualSpending * (1 + delta)), age: fireAgeFor({ ...base, profile: { ...profile, annualSpending: profile.annualSpending * (1 + delta) } }) }));
+  const rates = [.03, .0325, .035, .0375, .04].map((value) => ({ label: percent(value, 2), age: fireAgeFor({ ...base, profile: { ...profile, withdrawalRate: value } }) }));
+  const group = (title: string, items: { label: string; age?: number }[]) => <div className="sensitivity-group"><strong>{title}</strong><div>{items.map((item) => {
+    const difference = item.age == null || baselineAge == null ? undefined : item.age - baselineAge;
+    return <span key={item.label}><small>{item.label}</small><b>{item.age == null ? 'Not reached' : `Age ${item.age.toFixed(1)}`}</b><small>{difference == null ? `By age ${profile.maxAge}` : Math.abs(difference) < 1 / 12 ? 'Same age' : `${Math.abs(difference).toFixed(1)} years ${difference < 0 ? 'earlier' : 'later'}`}</small></span>;
+  })}</div></div>;
+  return <Section title="Sensitivity explorer" eyebrow="What could move your FIRE date?">
+    <p className="muted">For <strong>{selectedScenario.name}</strong>, the current assumptions {baselineAge == null ? `do not reach FIRE by age ${profile.maxAge}` : `reach FIRE at age ${baselineAge.toFixed(1)}`}. Each row changes one assumption and compares with that baseline. These previews do not change your plan.</p>
+    <p className="muted">This explorer assumes you keep contributing until FIRE, even beyond your chosen retirement age. The main chart includes retirement withdrawals, so its result can differ. These are fixed-return estimates, not probabilities of success. Custom account returns stay unchanged.</p>
+    <div className="sensitivity-grid">{group('Real annual return · after inflation', returns)}{extraAccount && group(`Extra monthly investing → ${extraAccount.name}`, contributions)}{profile.customFireNumber == null ? <>{group('Annual retirement spending', spending)}{group('Withdrawal rate · sizes your goal', rates)}</> : <p className="muted">Your custom FIRE target is fixed. Spending and withdrawal-rate changes do not change that target. Reset it to the spending-based calculation in Plan to explore those assumptions.</p>}</div>
+  </Section>;
 }

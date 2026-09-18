@@ -4,6 +4,7 @@ import type { AppData, Scenario } from '../domain/types';
 import { scenarioColors } from '../domain/defaults';
 import { applyScenarioOverrides, isTakeHomeBudgetAccount, scenarioBudgetMetrics } from '../domain/calculations';
 import { AccountsEditor, BudgetEditor, ProfileEditor } from './Editors';
+import { RothEditor } from './RothEditor';
 import { CommittedNumberInput, Field, money, SelectField, Toggle } from './ui';
 
 type Setter = Dispatch<SetStateAction<AppData>>;
@@ -134,7 +135,7 @@ export function InputHub({ data, setData, scenario, setSelected, phaseId, setPha
           <ContributionsEditor data={data} setData={setData} scenario={scenario} phaseId={phaseId} setPhaseId={setPhaseId} />
         </div></div>
       </>}
-      {tab === 'accounts' && <><div className="input-section-heading"><h2>Account balances & details</h2><p>Shared across scenarios. Monthly contributions are entered in Monthly money.</p></div><AccountsEditor data={data} setData={setData} /></>}
+      {tab === 'accounts' && <><div className="input-section-heading"><h2>Account balances & details</h2><p>Shared across scenarios. Monthly contributions are entered in Monthly money.</p></div><AccountsEditor data={data} setData={setData} /><RothEditor data={data} setData={setData} scenario={scenario} /></>}
     </div>
   </section>;
 }
