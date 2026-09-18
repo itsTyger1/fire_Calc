@@ -110,6 +110,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .brand > span { display: grid; place-items: center; width: 35px; height: 35px; color: #06161d; border-radius: 10px; background: var(--green); box-shadow: 0 0 28px rgba(55, 211, 154, .2); }
 .brand > div { display: grid; gap: 1px; }
 .brand strong { font: 800 17px 'Manrope', sans-serif; letter-spacing: -.02em; }
+.app-version { color: var(--green); font-size: .68em; letter-spacing: .02em; vertical-align: middle; }
 .brand small { color: var(--muted); font-size: 11px; }
 .top-actions { display: flex; gap: 5px; }
 .load-menu { position: relative; }

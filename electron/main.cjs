@@ -161,6 +161,8 @@ ipcMain.handle('check-for-updates', async () => {
   return { currentVersion: app.getVersion(), latestVersion: release.tag_name, updateAvailable: isNewer(release.tag_name, app.getVersion()), downloadUrl: asset?.browser_download_url ?? null, releaseUrl: release.html_url };
 });
 
+ipcMain.handle('get-app-version', () => app.getVersion());
+
 let installingUpdate = false;
 ipcMain.handle('download-and-install-update', async (_event, downloadUrl) => {
   if (typeof downloadUrl !== 'string' || !/^https:\/\/github\.com\/itsTyger1\/fire_Calc\/releases\/download\/[^/]+\/FIRE-Projector-Setup-[^/]+\.exe$/.test(downloadUrl)) throw new Error('Invalid update download URL');

@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('firePlans', {
 });
 
 contextBridge.exposeInMainWorld('fireUpdater', {
+  version: () => ipcRenderer.invoke('get-app-version'),
   check: () => ipcRenderer.invoke('check-for-updates'),
   install: (downloadUrl) => ipcRenderer.invoke('download-and-install-update', downloadUrl),
 });

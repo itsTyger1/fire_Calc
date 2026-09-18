@@ -4,6 +4,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 const assert = require('node:assert/strict');
+const { version: packageVersion } = require('../package.json');
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'fire-projector-test-'));
 app.setPath('userData', profile);
 app.disableHardwareAcceleration();
@@ -17,6 +18,7 @@ ipcMain.handle('save-plan-file', async (_event, _name, data) => {
   return { canceled: false, name: 'Retirement test', filePath: path.join(profile, 'Retirement test.json') };
 });
 ipcMain.handle('list-plan-files', async () => savedPlan ? [savedPlan] : []);
+ipcMain.handle('get-app-version', () => packageVersion);
 app.whenReady().then(async () => {
   const window = new BrowserWindow({ show: false, width: 1450, height: 1050, webPreferences: { partition: 'ui-smoke', contextIsolation: true, nodeIntegration: false, preload: path.join(__dirname, '../electron/preload.cjs') } });
   const evaluate = async (fn, ...args) => {
@@ -76,6 +78,7 @@ app.whenReady().then(async () => {
   try {
     const appRoot = process.argv.includes('--packaged') ? 'release/win-unpacked/resources/app.asar' : '.';
     await window.loadFile(path.join(__dirname, '..', appRoot, 'dist', 'index.html')); await wait();
+    assert.equal(await evaluate(() => document.querySelector('.app-version')?.textContent), `v${packageVersion}`);
     assert.equal(await evaluate(() => document.querySelectorAll('[role="tab"]').length), 3);
     assert.equal(await evaluate(() => document.querySelectorAll('#results input').length), 0);
     assert.equal(await evaluate(() => document.getElementById('inputs').compareDocumentPosition(document.getElementById('results')) & Node.DOCUMENT_POSITION_FOLLOWING), 4);

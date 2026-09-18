@@ -8,15 +8,17 @@ import { InputHub } from './components/InputHub';
 import { BudgetSummary } from './components/BudgetSummary';
 import { Analytics, BridgeAndEmergency, monthStatus, RetirementDrawdown, Sensitivity, SummaryTable, TimelineChart } from './components/Results';
 import { age, Metric, money, percent, Section } from './components/ui';
+import packageJson from '../package.json';
 type UpdateCheck = { currentVersion: string; latestVersion?: string; updateAvailable: boolean; downloadUrl?: string | null; releaseUrl?: string; noPublishedRelease?: boolean };
 declare global { interface Window {
-  fireUpdater?: { check: () => Promise<UpdateCheck>; install: (downloadUrl: string) => Promise<{ started: boolean }> };
+  fireUpdater?: { version: () => Promise<string>; check: () => Promise<UpdateCheck>; install: (downloadUrl: string) => Promise<{ started: boolean }> };
   firePlans?: {
     save: (name: string, data: AppData) => Promise<{ canceled: true } | { canceled: false; name: string; filePath: string }>;
     list: () => Promise<SavedPlan[]>;
   };
 } }
 const clone = <T,>(value: T): T => structuredClone(value);
+const fallbackAppVersion = packageJson.version;
 export default function App() {
   const [data, setData] = useState<AppData>(() => loadData());
   const [selected, setSelected] = useState(() => data.scenarios[0]?.id ?? '');
@@ -25,6 +27,7 @@ export default function App() {
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [installingUpdate, setInstallingUpdate] = useState(false);
   const [updatePromptOpen, setUpdatePromptOpen] = useState(false);
+  const [appVersion, setAppVersion] = useState(fallbackAppVersion);
   const [requestedPhaseId, setPhaseId] = useState<string>();
   const [savedPlans, setSavedPlans] = useState<SavedPlan[]>(() => window.firePlans ? [] : listSavedPlans());
   const [loadMenuOpen, setLoadMenuOpen] = useState(false);
@@ -33,6 +36,12 @@ export default function App() {
   const [saveConfirmation, setSaveConfirmation] = useState<{ name: string; location: string; warning?: string } | null>(null);
   const saveDialogRef = useRef<HTMLDialogElement>(null);
   useEffect(() => { if (saveConfirmation) saveDialogRef.current?.showModal(); }, [saveConfirmation]);
+  useEffect(() => {
+    if (!window.fireUpdater) return;
+    void window.fireUpdater.version().then((version) => {
+      if (version) setAppVersion(version);
+    }).catch(() => {});
+  }, []);
   // Keep controlled inputs responsive while projection and chart updates are
   // calculated in React's lower-priority render pass.
   const projectionData = useDeferredValue(data);
@@ -116,6 +125,7 @@ export default function App() {
     try {
       const result = await window.fireUpdater.check();
       setUpdate(result);
+      if (result.currentVersion) setAppVersion(result.currentVersion);
       if (result.noPublishedRelease) setToast('No desktop release is available yet. Repository changes must finish building before they can be installed.');
       else if (!result.updateAvailable) setToast(`You’re up to date (${result.currentVersion})`);
       else if (!result.downloadUrl) setToast(`Version ${result.latestVersion} is available, but no installer was published`);
@@ -152,7 +162,7 @@ export default function App() {
         ? `${money(contributionDifference)}/mo above amount needed`
         : `${money(-contributionDifference)}/mo more needed`;
   return <div className="app-shell">
-    <header className="topbar"><div className="brand"><span><Flame size={19} /></span><div><strong>FIRE Projector</strong><small>{data.profile.mode === 'real' ? 'Today’s dollars' : 'Future nominal dollars'}</small></div></div><div className="top-actions"><button className="button ghost" onClick={() => void handleSave()} disabled={savingPlan}><Save size={16} /> <span>{savingPlan ? 'Saving…' : 'Save'}</span></button><div className="load-menu" ref={loadMenuRef}><button className="button ghost" onClick={handleToggleLoadMenu} aria-haspopup="menu" aria-expanded={loadMenuOpen}><FolderOpen size={16} /> <span>Load</span></button>{loadMenuOpen && <div className="load-menu-panel" role="menu" aria-label="Saved plans"><div className="load-menu-heading"><strong>Saved plans</strong><small>{savedPlans.length ? `${savedPlans.length} saved ${savedPlans.length === 1 ? 'plan' : 'plans'}` : 'No saves yet'}</small></div>{savedPlans.length ? savedPlans.map((saved) => <button key={saved.id} className="load-menu-item" role="menuitem" onClick={() => handleLoad(saved)}><span><strong>{saved.name}</strong><small>Saved {new Date(saved.savedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}</small></span></button>) : <p className="load-menu-empty">Use Save to create a named plan.</p>}</div>}</div><button className="button ghost" onClick={handleRefresh}><RefreshCcw size={16} /> <span>Refresh app</span></button><button className="button ghost" onClick={handleUpdate} disabled={checkingUpdate || installingUpdate}><RefreshCcw size={16} /> <span>{checkingUpdate ? 'Checking…' : installingUpdate ? 'Downloading…' : 'Check updates'}</span></button><button className="button danger" onClick={handleReset}><RefreshCcw size={16} /> <span>Reset</span></button></div></header>
+    <header className="topbar"><div className="brand"><span><Flame size={19} /></span><div><strong>FIRE Projector <span className="app-version">v{appVersion}</span></strong><small>{data.profile.mode === 'real' ? 'Today’s dollars' : 'Future nominal dollars'}</small></div></div><div className="top-actions"><button className="button ghost" onClick={() => void handleSave()} disabled={savingPlan}><Save size={16} /> <span>{savingPlan ? 'Saving…' : 'Save'}</span></button><div className="load-menu" ref={loadMenuRef}><button className="button ghost" onClick={handleToggleLoadMenu} aria-haspopup="menu" aria-expanded={loadMenuOpen}><FolderOpen size={16} /> <span>Load</span></button>{loadMenuOpen && <div className="load-menu-panel" role="menu" aria-label="Saved plans"><div className="load-menu-heading"><strong>Saved plans</strong><small>{savedPlans.length ? `${savedPlans.length} saved ${savedPlans.length === 1 ? 'plan' : 'plans'}` : 'No saves yet'}</small></div>{savedPlans.length ? savedPlans.map((saved) => <button key={saved.id} className="load-menu-item" role="menuitem" onClick={() => handleLoad(saved)}><span><strong>{saved.name}</strong><small>Saved {new Date(saved.savedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}</small></span></button>) : <p className="load-menu-empty">Use Save to create a named plan.</p>}</div>}</div><button className="button ghost" onClick={handleRefresh}><RefreshCcw size={16} /> <span>Refresh app</span></button><button className="button ghost" onClick={handleUpdate} disabled={checkingUpdate || installingUpdate}><RefreshCcw size={16} /> <span>{checkingUpdate ? 'Checking…' : installingUpdate ? 'Downloading…' : 'Check updates'}</span></button><button className="button danger" onClick={handleReset}><RefreshCcw size={16} /> <span>Reset</span></button></div></header>
 
     <main className="workspace">
       <InputHub data={data} setData={setData} scenario={selectedScenario} setSelected={setSelected} phaseId={fireInvestingPhaseId} setPhaseId={setPhaseId} />
