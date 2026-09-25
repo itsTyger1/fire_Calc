@@ -346,6 +346,23 @@ export const solveRequiredContributionScale = (
   return high;
 };
 
+export const calculateCoastFire = (profile: Profile, accounts: Account[]) => {
+  if (profile.currentAge >= 100 || profile.retirementAge >= 100 || profile.retirementAge < profile.currentAge) return null;
+  const points = projectCore({
+    profile: { ...profile, maxAge: 100 },
+    accounts: accounts.map((account) => ({ ...account, monthlyContribution: 0, employerContribution: 0 })),
+    phases: [],
+    includeRetirement: true,
+  });
+  const ending = points.at(-1)!;
+  return {
+    reached: ending.cumulativeWithdrawalShortfall < 0.01
+      && points.every((point) => point.projectionPhase !== 'retirement' || point.age >= 100 || point.firePortfolio > 0 || profile.annualSpending === 0)
+      && ending.cumulativeConversionTax - ending.cumulativeConversionTaxPaid < 0.01,
+    endingBalance: ending.firePortfolio,
+  };
+};
+
 export const projectScenario = (data: AppData, scenario: Scenario): ScenarioResult => {
   const { profile, accounts, phases } = applyScenarioOverrides(data, scenario);
   const points = projectCore({ profile, accounts, phases, includeRetirement: true });
@@ -390,6 +407,7 @@ export const projectScenario = (data: AppData, scenario: Scenario): ScenarioResu
     plannedPersonalMonthly, plannedEmployerMonthly, requiredPersonalMonthly, requiredContributionScale,
     contributionGap: Number.isFinite(requiredPersonalMonthly) ? requiredPersonalMonthly - plannedPersonalMonthly : Infinity,
     retirementSummary,
+    coastFire: calculateCoastFire(profile, accounts),
   };
 };
 

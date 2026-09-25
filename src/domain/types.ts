@@ -202,4 +202,5 @@ export interface ScenarioResult {
   requiredContributionScale: number;
   contributionGap: number;
   retirementSummary: RetirementSummary;
+  coastFire: { reached: boolean; endingBalance: number } | null;
 }

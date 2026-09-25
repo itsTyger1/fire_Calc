@@ -134,6 +134,18 @@ export function SummaryTable({ results, selected, onSelect }: { results: Scenari
   return <div className="table-wrap"><table><thead><tr><th>Scenario</th><th>FIRE goal</th><th>FIRE age / date</th><th>At target age</th><th>Monthly investing</th><th>Surplus / shortfall</th><th>Status</th></tr></thead><tbody>{results.map((result) => { const delta = result.targetPoint.firePortfolio - result.targetPoint.fireTarget; const status = monthStatus(result); return <tr key={result.scenario.id} className={selected === result.scenario.id ? 'selected' : ''} onClick={() => onSelect(result.scenario.id)}><td><i style={{ background: result.scenario.color }} /><strong>{result.scenario.name}</strong></td><td>{money(result.fireNumber, true)}</td><td><strong>{age(result.firePoint?.age)}</strong><small>{result.firePoint ? new Date(result.firePoint.date).toLocaleDateString(undefined, { month: 'short', year: 'numeric' }) : `By age ${result.profile.maxAge}`}</small></td><td>{money(result.targetPoint.firePortfolio, true)}</td><td>{money(result.plannedPersonalMonthly + result.plannedEmployerMonthly)}/mo<small>{money(result.plannedEmployerMonthly)} employer</small></td><td className={delta >= 0 ? 'positive-text' : 'negative-text'}>{delta >= 0 ? '+' : ''}{money(delta, true)}</td><td><span className={`status ${status.tone}`}>{status.text}</span></td></tr>; })}</tbody></table></div>;
 }
 
+export function CoastFireStatus({ result }: { result: ScenarioResult }) {
+  if (result.targetPoint.firePortfolio >= result.targetPoint.fireTarget) return null;
+  const coast = result.coastFire;
+  return <Section title="Coast FIRE" eyebrow="When your FIRE target is out of reach">
+    <div className={`drawdown-callout ${coast?.reached ? 'positive' : 'negative'}`}><div>
+      <strong>{coast ? coast.reached ? 'Coast FIRE reached' : 'Coast FIRE not yet reached' : 'Coast FIRE unavailable'}</strong>
+      <p>{coast ? <>With no further personal or employer contributions, your current portfolio is projected to {coast.reached ? 'cover' : 'fall short of covering'} your {money(result.profile.annualSpending)} annual spending goal from age {result.profile.retirementAge} through age 100.</> : 'This check requires a retirement age at or after your current age and before age 100.'}</p>
+    </div></div>
+    <p className="fine-print">Uses your scenario’s returns, FIRE-eligible accounts, and scheduled Roth transfers, with inflation applied in future-dollar mode. This check runs to age 100 regardless of the maximum projection age. It assumes living costs are covered separately before retirement. Returns are deterministic; account access restrictions and taxes other than scheduled conversion taxes are not modeled.</p>
+  </Section>;
+}
+
 export function RetirementDrawdown({ result }: { result: ScenarioResult }) {
   const summary = result.retirementSummary;
   const endingPoint = result.points.at(-1)!;

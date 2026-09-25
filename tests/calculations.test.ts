@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { defaultData } from '../src/domain/defaults';
 import {
-  aggregateAccounts, annualToMonthlyRate, applyScenarioOverrides, calculateFireNumber,
+  aggregateAccounts, annualToMonthlyRate, applyScenarioOverrides, calculateFireNumber, calculateCoastFire,
   bridgeMetrics, emergencyFundMetrics, findFireCrossing, growAccountOneMonth, projectCore,
   projectScenario, resolvePhase, scenarioBudgetMetrics, solveRequiredAdditionalContribution,
   solveRequiredContributionScale, nominalReturnFromReal, realReturnFromNominal,
@@ -12,6 +12,34 @@ const profile = { ...defaultData.profile, currentAge: 30, retirementAge: 31, max
 const account: Account = { ...defaultData.accounts[3], id: 'test', balance: 10000, monthlyContribution: 100, employerContribution: 50, fireEligible: true };
 
 describe('financial calculations', () => {
+  it('recognizes Coast FIRE below a custom target without counting future contributions', () => {
+    const data = structuredClone(defaultData);
+    data.profile = { ...profile, currentAge: 60, retirementAge: 65, maxAge: 70, customFireNumber: 1000000, rothTransfers: [], mode: 'real' };
+    data.accounts = [{ ...account, balance: 420001, annualReturn: 0, returnMode: 'custom', monthlyContribution: 0, employerContribution: 0 }];
+    data.phases = [];
+    const result = projectScenario(data, { ...data.scenarios[0], overrides: {} });
+    expect(result.targetPoint.firePortfolio).toBeLessThan(result.targetPoint.fireTarget);
+    expect(result.coastFire?.reached).toBe(true);
+    expect(result.coastFire?.endingBalance).toBeCloseTo(1);
+    data.accounts[0].balance = 419000;
+    data.accounts[0].monthlyContribution = 10000;
+    data.accounts[0].employerContribution = 10000;
+    expect(projectScenario(data, { ...data.scenarios[0], overrides: {} }).coastFire?.reached).toBe(false);
+  });
+  it('checks the entire age-100 horizon and applies inflation to coast spending', () => {
+    const coastProfile = { ...profile, currentAge: 60, retirementAge: 65, maxAge: 66, rothTransfers: [], mode: 'real' as const };
+    const coastAccount = { ...account, balance: 420001, annualReturn: 0, returnMode: 'custom' as const };
+    expect(calculateCoastFire(coastProfile, [coastAccount])?.reached).toBe(true);
+    expect(calculateCoastFire({ ...coastProfile, mode: 'nominal', inflationRate: 0.03 }, [coastAccount])?.reached).toBe(false);
+    expect(calculateCoastFire({ ...coastProfile, maxAge: 110 }, [coastAccount])).toEqual(calculateCoastFire(coastProfile, [coastAccount]));
+    expect(calculateCoastFire({ ...coastProfile, retirementAge: 100 }, [coastAccount])).toBeNull();
+  });
+  it('uses scenario spending overrides for Coast FIRE', () => {
+    const data = structuredClone(defaultData);
+    data.profile = { ...profile, currentAge: 60, retirementAge: 65, maxAge: 70, rothTransfers: [], mode: 'real' };
+    data.accounts = [{ ...account, balance: 420001, annualReturn: 0, returnMode: 'custom' }];
+    expect(projectScenario(data, { ...data.scenarios[0], overrides: { annualSpending: 24000 } }).coastFire?.reached).toBe(false);
+  });
   it('does not report a hypothetical crossing when planned retirement depletes the portfolio', () => {
     const data = structuredClone(defaultData);
     data.profile = { ...profile, retirementAge: 31, maxAge: 40, customFireNumber: 20000 };

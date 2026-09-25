@@ -6,7 +6,7 @@ import { projectScenario, scenarioBudgetMetrics } from './domain/calculations';
 import { listSavedPlans, loadData, resetData, saveData, saveNamedPlan, type SavedPlan } from './lib/persistence';
 import { InputHub } from './components/InputHub';
 import { BudgetSummary } from './components/BudgetSummary';
-import { Analytics, BridgeAndEmergency, monthStatus, RetirementDrawdown, Sensitivity, SummaryTable, TimelineChart } from './components/Results';
+import { Analytics, BridgeAndEmergency, CoastFireStatus, monthStatus, RetirementDrawdown, Sensitivity, SummaryTable, TimelineChart } from './components/Results';
 import { age, Metric, money, percent, Section } from './components/ui';
 import packageJson from '../package.json';
 type UpdateCheck = { currentVersion: string; latestVersion?: string; updateAvailable: boolean; downloadUrl?: string | null; releaseUrl?: string; noPublishedRelease?: boolean };
@@ -179,6 +179,7 @@ export default function App() {
       </section>
 
       <RetirementDrawdown result={base} />
+      <CoastFireStatus result={base} />
 
       <Section title="Scenario timelines" eyebrow="Compare every path" action={<span className="panel-note"><CircleDollarSign size={14} /> Monthly compounding</span>}>
         <TimelineChart results={results} selected={base.scenario.id} onSelect={setSelected} />
