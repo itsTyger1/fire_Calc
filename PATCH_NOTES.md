@@ -1,13 +1,19 @@
 # FIRE Projector patch notes
 
-This history is compiled from the project’s Git commits and published GitHub Releases, from the first repository commit on September 4, 2026. It records development milestones as well as versioned releases. Published versions include v1.2.1, v1.2.2, v1.2.4, v1.2.5, v1.2.6, and v1.2.71; no v1.2.3 release or tag was found in the available history.
+This history is compiled from the project’s Git commits and published GitHub Releases, from the first repository commit on September 4, 2026. It records development milestones as well as versioned releases. Published versions include v1.2.1, v1.2.2, v1.2.4, v1.2.5, v1.2.6, v1.2.71, and v1.2.72; no v1.2.3 release or tag was found in the available history.
+
+## v1.2.72 — September 2026
+
+- Replaced native scenario delete/reset confirmations with in-app dialogs, keeping name editing and cursor focus working after list changes, confirmation, and cancellation. Added repeated mouse and keyboard regression checks for these flows.
+- New and duplicated scenarios immediately select the live editor state, close the Manage scenarios menu, and focus the new name for renaming. This avoids waiting for deferred chart calculations before the name field becomes editable.
+- Both scenario deletion controls now restore focus to the remaining scenario’s name. Deleting another scenario also preserves an in-progress name edit.
+- Separated scenario-name editing from opening the scenario menu. Use the arrow to choose a scenario; editing keeps normal cursor placement and no longer filters the scenario list. Name changes save on Enter or blur without a delayed save callback.
+- Moved the positive Coast FIRE status into the results sentence, with green text, and removed the separate panel. Plans that do not reach Coast FIRE omit that message.
 
 ## v1.2.71 — September 2026
 
 - Fixed the Coast FIRE indicator to include planned personal and employer contributions and contribution phases until the retirement age, matching the chart. Previously it assumed all contributions stopped immediately and could report failure despite a funded retirement in the chart.
 - Clarified the indicator’s contribution assumptions in its explanation.
-
-## v1.2.6 — September 2026
 
 ## v1.2.6 — September 2026
 

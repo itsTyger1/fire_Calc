@@ -32,7 +32,7 @@ app.whenReady().then(async () => {
   window.webContents.on('console-message', (event) => { if (event.level === 'error') errors.push(event.message); });
   const select = async (label, value) => {
     if (label === 'Scenario you’re editing') {
-      await evaluate(() => document.querySelector('[role="combobox"]').click());
+      await evaluate(() => document.querySelector('[aria-label="Choose scenario"]').click());
       await wait();
       await evaluate((id) => {
         const names = { base: 'Base FIRE at 50', conservative: 'Conservative returns' };

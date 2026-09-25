@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { ChevronDown, Copy, Plus, RefreshCcw, Trash2 } from 'lucide-react';
 import type { AppData, Scenario } from '../domain/types';
 import { scenarioColors } from '../domain/defaults';
@@ -25,19 +25,32 @@ export function InputHub({ data, setData, scenario, setSelected, phaseId, setPha
   const [scenarioDraftName, setScenarioDraftName] = useState(scenario.name);
   const scenarioPickerRef = useRef<HTMLDivElement>(null);
   const scenarioOptionsRef = useRef<HTMLDetailsElement>(null);
+  const scenarioNameRef = useRef<HTMLInputElement>(null);
+  const pendingRenameId = useRef<string | null>(null);
+  const [scenarioAction, setScenarioAction] = useState<{ kind: 'delete' | 'reset'; id: string; name: string } | null>(null);
+  const scenarioDialogRef = useRef<HTMLDialogElement>(null);
   const budget = scenarioBudgetMetrics(data, scenario, 1, phaseId);
   const effective = applyScenarioOverrides(data, scenario);
   const patchScenario = (patch: Partial<Scenario>) => setData((old) => ({ ...old, scenarios: old.scenarios.map((item) => item.id === scenario.id ? { ...item, ...patch } : item) }));
   const patchOverride = (patch: Scenario['overrides']) => patchScenario({ overrides: { ...scenario.overrides, ...patch } });
   useEffect(() => setScenarioDraftName(scenario.name), [scenario.id, scenario.name]);
+  useEffect(() => { if (scenarioAction) scenarioDialogRef.current?.showModal(); }, [scenarioAction]);
+  useLayoutEffect(() => {
+    if (scenarioAction || pendingRenameId.current !== scenario.id) return;
+    pendingRenameId.current = null;
+    scenarioNameRef.current?.focus();
+    scenarioNameRef.current?.select();
+  });
   const commitScenarioName = () => {
     const nextName = scenarioDraftName.trim();
-    if (!nextName) setScenarioDraftName(scenario.name);
-    else if (nextName !== scenario.name) patchScenario({ name: nextName });
+    setScenarioDraftName(nextName || scenario.name);
+    if (nextName && nextName !== scenario.name) patchScenario({ name: nextName });
   };
   const selectScenario = (id: string) => {
     const next = data.scenarios.find((item) => item.id === id);
     if (!next) return;
+    commitScenarioName();
+    if (id === scenario.id) { setScenarioMenuOpen(false); return; }
     setScenarioDraftName(next.name);
     setScenarioMenuOpen(false);
     setSelected(id);
@@ -45,24 +58,46 @@ export function InputHub({ data, setData, scenario, setSelected, phaseId, setPha
   const deleteScenario = (id: string) => {
     if (data.scenarios.length <= 1) return;
     const target = data.scenarios.find((item) => item.id === id);
-    if (!target || !window.confirm(`Delete ${target.name}?`)) return;
+    if (!target) return;
     const remaining = data.scenarios.filter((item) => item.id !== id);
-    setData((old) => ({ ...old, scenarios: remaining }));
-    if (id === scenario.id) setSelected(remaining[0].id);
+    const editedName = scenarioDraftName.trim() || scenario.name;
+    const next = id === scenario.id ? remaining[0] : { ...scenario, name: editedName };
+    scenarioOptionsRef.current?.removeAttribute('open');
+    setScenarioMenuOpen(false);
+    setScenarioDraftName(next.name);
+    pendingRenameId.current = next.id;
+    setData((old) => ({ ...old, scenarios: old.scenarios.filter((item) => item.id !== id)
+      .map((item) => id !== scenario.id && item.id === scenario.id ? { ...item, name: editedName } : item) }));
+    if (id === scenario.id) setSelected(next.id);
   };
-  const visibleScenarioOptions = scenarioDraftName === scenario.name
-    ? data.scenarios
-    : data.scenarios.filter((item) => item.name.toLowerCase().includes(scenarioDraftName.trim().toLowerCase()));
+  const requestScenarioAction = (kind: 'delete' | 'reset', id: string) => {
+    const target = data.scenarios.find((item) => item.id === id);
+    if (!target || (kind === 'delete' && data.scenarios.length <= 1)) return;
+    commitScenarioName();
+    scenarioOptionsRef.current?.removeAttribute('open');
+    setScenarioMenuOpen(false);
+    setScenarioAction({ kind, id, name: id === scenario.id ? scenarioDraftName.trim() || scenario.name : target.name });
+  };
+  const closeScenarioDialog = () => {
+    scenarioDialogRef.current?.close();
+    setScenarioAction(null);
+    pendingRenameId.current = scenario.id;
+  };
+  const confirmScenarioAction = () => {
+    if (!scenarioAction) return;
+    closeScenarioDialog();
+    if (scenarioAction.kind === 'delete') deleteScenario(scenarioAction.id);
+    else setData((old) => ({ ...old, scenarios: old.scenarios.map((item) => item.id === scenarioAction.id ? { ...item, overrides: {} } : item) }));
+  };
   useEffect(() => {
     if (!scenarioMenuOpen) return;
     const closeOnOutsideClick = (event: PointerEvent) => {
       if (scenarioPickerRef.current?.contains(event.target as Node)) return;
-      commitScenarioName();
       setScenarioMenuOpen(false);
     };
     document.addEventListener('pointerdown', closeOnOutsideClick);
     return () => document.removeEventListener('pointerdown', closeOnOutsideClick);
-  }, [scenarioMenuOpen, scenarioDraftName, scenario.name]);
+  }, [scenarioMenuOpen]);
   useEffect(() => {
     const closeScenarioOptionsOnOutsideClick = (event: PointerEvent) => {
       const options = scenarioOptionsRef.current;
@@ -80,6 +115,10 @@ export function InputHub({ data, setData, scenario, setSelected, phaseId, setPha
       id: crypto.randomUUID(), name: duplicate ? `${scenario.name} copy` : `Scenario ${data.scenarios.length + 1}`,
       visible: true, color: scenarioColors[data.scenarios.length % scenarioColors.length],
     };
+    scenarioOptionsRef.current?.removeAttribute('open');
+    setScenarioMenuOpen(false);
+    pendingRenameId.current = next.id;
+    setScenarioDraftName(next.name);
     setData((old) => ({ ...old, scenarios: [...old.scenarios, next] }));
     setSelected(next.id);
   };
@@ -92,19 +131,23 @@ export function InputHub({ data, setData, scenario, setSelected, phaseId, setPha
   }) }));
 
   return <section id="inputs" className="input-hub" aria-labelledby="input-heading">
+    {scenarioAction && <dialog ref={scenarioDialogRef} className="update-modal scenario-confirmation" aria-labelledby="scenario-confirmation-title" onCancel={(event) => { event.preventDefault(); closeScenarioDialog(); }}>
+      <h2 id="scenario-confirmation-title">{scenarioAction.kind === 'delete' ? 'Delete scenario?' : 'Reset scenario?'}</h2>
+      <p>{scenarioAction.kind === 'delete' ? <>Delete “{scenarioAction.name}” from this plan?</> : <>Reset all overrides for “{scenarioAction.name}”?</>}</p>
+      <div className="update-modal-actions">
+        <button type="button" autoFocus className="button secondary" onClick={closeScenarioDialog}>Cancel</button>
+        <button type="button" className="button danger" onClick={confirmScenarioAction}>{scenarioAction.kind === 'delete' ? 'Delete scenario' : 'Reset scenario'}</button>
+      </div>
+    </dialog>}
     <div className="input-intro"><div><span className="eyebrow">Set up once. Explore below.</span><h1 id="input-heading">Your FIRE plan</h1><p>All your inputs in one place. Press <kbd>Enter</kbd> to apply a number; <kbd>Esc</kbd> to cancel. Changes save automatically.</p></div><a href="#results" className="button primary">View results ↓</a></div>
     <div className="scenario-toolbar">
-      <div ref={scenarioPickerRef} className="field scenario-picker"><span className="field-label">Scenario you’re editing</span><span className="scenario-picker-control"><span className="scenario-picker-input-wrap"><input className="text-input" role="combobox" aria-label="Scenario you’re editing" aria-expanded={scenarioMenuOpen} aria-controls="scenario-options" value={scenarioDraftName} onFocus={() => setScenarioMenuOpen(true)} onClick={() => setScenarioMenuOpen(true)} onChange={(event) => { setScenarioDraftName(event.target.value); setScenarioMenuOpen(true); }} onBlur={() => { window.setTimeout(() => { commitScenarioName(); setScenarioMenuOpen(false); }, 0); }} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commitScenarioName(); setScenarioMenuOpen(false); } else if (event.key === 'Escape') { event.preventDefault(); setScenarioDraftName(scenario.name); setScenarioMenuOpen(false); } }} /><ChevronDown className="scenario-picker-chevron" size={15} aria-hidden="true" /></span><button type="button" className="icon-button" disabled={data.scenarios.length >= MAX_SCENARIOS} onClick={() => addScenario(false)} aria-label="Add scenario" title="Add scenario"><Plus size={17} /></button></span>{scenarioMenuOpen && <div className="scenario-picker-menu" id="scenario-options" role="listbox">{visibleScenarioOptions.length > 0 ? visibleScenarioOptions.map((item) => <div className="scenario-option-row" role="option" aria-selected={item.id === scenario.id} key={item.id} onMouseDown={(event) => { if ((event.target as HTMLElement).closest('button')) return; event.preventDefault(); selectScenario(item.id); }}><span>{item.name}</span><button type="button" className="scenario-option-delete" disabled={data.scenarios.length <= 1} aria-label={`Delete ${item.name}`} title={`Delete ${item.name}`} onMouseDown={(event) => event.preventDefault()} onClick={() => deleteScenario(item.id)}><Trash2 size={14} /></button></div>) : <span className="scenario-picker-empty">No matching scenarios</span>}</div>}</div>
+      <div ref={scenarioPickerRef} className="field scenario-picker"><span className="field-label">Scenario you’re editing</span><span className="scenario-picker-control"><span className="scenario-picker-input-wrap"><input ref={scenarioNameRef} className="text-input" role="combobox" aria-label="Scenario you’re editing" aria-expanded={scenarioMenuOpen} aria-controls="scenario-options" value={scenarioDraftName} onClick={() => setScenarioMenuOpen(false)} onChange={(event) => { setScenarioDraftName(event.target.value); setScenarioMenuOpen(false); }} onBlur={() => { commitScenarioName(); setScenarioMenuOpen(false); }} onKeyDown={(event) => { if (event.key === 'ArrowDown' && event.altKey) { event.preventDefault(); setScenarioMenuOpen(true); } else if (event.key === 'Enter') { event.preventDefault(); commitScenarioName(); setScenarioMenuOpen(false); } else if (event.key === 'Escape') { event.preventDefault(); setScenarioDraftName(scenario.name); setScenarioMenuOpen(false); } }} /><button type="button" className="scenario-picker-toggle" aria-label="Choose scenario" aria-expanded={scenarioMenuOpen} aria-controls="scenario-options" onMouseDown={(event) => event.preventDefault()} onClick={() => setScenarioMenuOpen((open) => !open)}><ChevronDown size={15} aria-hidden="true" /></button></span><button type="button" className="icon-button" disabled={data.scenarios.length >= MAX_SCENARIOS} onClick={() => addScenario(false)} aria-label="Add scenario" title="Add scenario"><Plus size={17} /></button></span>{scenarioMenuOpen && <div className="scenario-picker-menu" id="scenario-options" role="listbox">{data.scenarios.length > 0 ? data.scenarios.map((item) => <div className="scenario-option-row" role="option" aria-selected={item.id === scenario.id} key={item.id} onMouseDown={(event) => { if ((event.target as HTMLElement).closest('button')) return; event.preventDefault(); selectScenario(item.id); }}><span>{item.name}</span><button type="button" className="scenario-option-delete" disabled={data.scenarios.length <= 1} aria-label={`Delete ${item.name}`} title={`Delete ${item.name}`} onMouseDown={(event) => event.preventDefault()} onClick={() => requestScenarioAction('delete', item.id)}><Trash2 size={14} /></button></div>) : <span className="scenario-picker-empty">No matching scenarios</span>}</div>}</div>
       <p>Goals and monthly amounts apply to this scenario. Fields marked “shared” apply to every scenario.</p>
       <div className="scenario-toolbar-actions"><details ref={scenarioOptionsRef} className="scenario-options"><summary>Manage scenarios</summary><div className="scenario-options-body">
         <Toggle label="Show on timeline" checked={scenario.visible} onChange={(visible) => patchScenario({ visible })} />
         <div className="scenario-modal-actions"><button className="button secondary" disabled={data.scenarios.length >= MAX_SCENARIOS} onClick={() => addScenario(false)}><Plus size={14} /> New</button><button className="button secondary" disabled={data.scenarios.length >= MAX_SCENARIOS} onClick={() => addScenario(true)}><Copy size={14} /> Duplicate</button></div>
-        <button className="button secondary" onClick={() => { if (window.confirm(`Reset all overrides for ${scenario.name}?`)) patchScenario({ overrides: {} }); }}><RefreshCcw size={14} /> Reset scenario</button>
-        <button className="button danger" disabled={data.scenarios.length <= 1} onClick={() => {
-          if (!window.confirm(`Delete ${scenario.name}?`)) return;
-          setData((old) => ({ ...old, scenarios: old.scenarios.filter((item) => item.id !== scenario.id) }));
-          setSelected(data.scenarios.find((item) => item.id !== scenario.id)!.id);
-        }}><Trash2 size={14} /> Delete scenario</button>
+        <button className="button secondary" onClick={() => requestScenarioAction('reset', scenario.id)}><RefreshCcw size={14} /> Reset scenario</button>
+        <button className="button danger" disabled={data.scenarios.length <= 1} onClick={() => requestScenarioAction('delete', scenario.id)}><Trash2 size={14} /> Delete scenario</button>
       </div></details></div>
     </div>
     <div className="input-tabs" role="tablist" aria-label="Plan inputs">
