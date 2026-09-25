@@ -346,12 +346,12 @@ export const solveRequiredContributionScale = (
   return high;
 };
 
-export const calculateCoastFire = (profile: Profile, accounts: Account[]) => {
+export const calculateCoastFire = (profile: Profile, accounts: Account[], phases: ContributionPhase[] = []) => {
   if (profile.currentAge >= 100 || profile.retirementAge >= 100 || profile.retirementAge < profile.currentAge) return null;
   const points = projectCore({
     profile: { ...profile, maxAge: 100 },
-    accounts: accounts.map((account) => ({ ...account, monthlyContribution: 0, employerContribution: 0 })),
-    phases: [],
+    accounts,
+    phases,
     includeRetirement: true,
   });
   const ending = points.at(-1)!;
@@ -407,7 +407,7 @@ export const projectScenario = (data: AppData, scenario: Scenario): ScenarioResu
     plannedPersonalMonthly, plannedEmployerMonthly, requiredPersonalMonthly, requiredContributionScale,
     contributionGap: Number.isFinite(requiredPersonalMonthly) ? requiredPersonalMonthly - plannedPersonalMonthly : Infinity,
     retirementSummary,
-    coastFire: calculateCoastFire(profile, accounts),
+    coastFire: calculateCoastFire(profile, accounts, phases),
   };
 };
 

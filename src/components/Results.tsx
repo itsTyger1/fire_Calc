@@ -140,9 +140,9 @@ export function CoastFireStatus({ result }: { result: ScenarioResult }) {
   return <Section title="Coast FIRE" eyebrow="When your FIRE target is out of reach">
     <div className={`drawdown-callout ${coast?.reached ? 'positive' : 'negative'}`}><div>
       <strong>{coast ? coast.reached ? 'Coast FIRE reached' : 'Coast FIRE not yet reached' : 'Coast FIRE unavailable'}</strong>
-      <p>{coast ? <>With no further personal or employer contributions, your current portfolio is projected to {coast.reached ? 'cover' : 'fall short of covering'} your {money(result.profile.annualSpending)} annual spending goal from age {result.profile.retirementAge} through age 100.</> : 'This check requires a retirement age at or after your current age and before age 100.'}</p>
+      <p>{coast ? <>Following your planned personal and employer contributions until age {result.profile.retirementAge}, then stopping contributions, your portfolio is projected to {coast.reached ? 'cover' : 'fall short of covering'} your {money(result.profile.annualSpending)} annual spending goal through age 100.</> : 'This check requires a retirement age at or after your current age and before age 100.'}</p>
     </div></div>
-    <p className="fine-print">Uses your scenario’s returns, FIRE-eligible accounts, and scheduled Roth transfers, with inflation applied in future-dollar mode. This check runs to age 100 regardless of the maximum projection age. It assumes living costs are covered separately before retirement. Returns are deterministic; account access restrictions and taxes other than scheduled conversion taxes are not modeled.</p>
+    <p className="fine-print">Uses the same contribution phases, returns, FIRE-eligible accounts, and scheduled Roth transfers as the chart, with inflation applied in future-dollar mode. This check runs to age 100 regardless of the maximum projection age. It assumes living costs are covered separately before retirement. Returns are deterministic; account access restrictions and taxes other than scheduled conversion taxes are not modeled.</p>
   </Section>;
 }
 

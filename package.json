@@ -1,7 +1,7 @@
 {
   "name": "fire-projector",
   "private": true,
-  "version": "1.2.6",
+  "version": "1.2.71",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {

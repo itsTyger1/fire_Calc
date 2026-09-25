@@ -12,7 +12,7 @@ const profile = { ...defaultData.profile, currentAge: 30, retirementAge: 31, max
 const account: Account = { ...defaultData.accounts[3], id: 'test', balance: 10000, monthlyContribution: 100, employerContribution: 50, fireEligible: true };
 
 describe('financial calculations', () => {
-  it('recognizes Coast FIRE below a custom target without counting future contributions', () => {
+  it('recognizes Coast FIRE below a custom target using planned contributions until retirement', () => {
     const data = structuredClone(defaultData);
     data.profile = { ...profile, currentAge: 60, retirementAge: 65, maxAge: 70, customFireNumber: 1000000, rothTransfers: [], mode: 'real' };
     data.accounts = [{ ...account, balance: 420001, annualReturn: 0, returnMode: 'custom', monthlyContribution: 0, employerContribution: 0 }];
@@ -22,8 +22,21 @@ describe('financial calculations', () => {
     expect(result.coastFire?.reached).toBe(true);
     expect(result.coastFire?.endingBalance).toBeCloseTo(1);
     data.accounts[0].balance = 419000;
-    data.accounts[0].monthlyContribution = 10000;
-    data.accounts[0].employerContribution = 10000;
+    expect(projectScenario(data, { ...data.scenarios[0], overrides: {} }).coastFire?.reached).toBe(false);
+    data.accounts[0].monthlyContribution = 10;
+    data.accounts[0].employerContribution = 10;
+    expect(projectScenario(data, { ...data.scenarios[0], overrides: {} }).coastFire).toEqual({ reached: true, endingBalance: 200 });
+  });
+  it('matches a growing retirement chart with scenario contribution phase overrides', () => {
+    const data = structuredClone(defaultData);
+    data.profile = { ...profile, currentAge: 60, retirementAge: 65, maxAge: 100, customFireNumber: 1000000, rothTransfers: [], mode: 'real' };
+    data.accounts = [{ ...account, balance: 100000, annualReturn: 0.05, returnMode: 'custom', monthlyContribution: 0, employerContribution: 0 }];
+    data.phases = [{ id: 'saving', name: 'Saving', startsWhen: { kind: 'always' }, contributions: { test: { personal: 0, employer: 0 } } }];
+    const result = projectScenario(data, { ...data.scenarios[0], overrides: { phaseContributions: { saving: { test: { personal: 2000, employer: 1000 } } } } });
+    expect(result.targetPoint.firePortfolio).toBeLessThan(result.targetPoint.fireTarget);
+    const retirement = result.points.filter((point) => point.projectionPhase === 'retirement');
+    expect(retirement.every((point, index) => index === 0 || point.firePortfolio > retirement[index - 1].firePortfolio)).toBe(true);
+    expect(result.coastFire).toEqual({ reached: true, endingBalance: result.points.at(-1)!.firePortfolio });
     expect(projectScenario(data, { ...data.scenarios[0], overrides: {} }).coastFire?.reached).toBe(false);
   });
   it('checks the entire age-100 horizon and applies inflation to coast spending', () => {

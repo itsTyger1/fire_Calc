@@ -1,6 +1,13 @@
 # FIRE Projector patch notes
 
-This history is compiled from the project’s Git commits and published GitHub Releases, from the first repository commit on September 4, 2026. It records development milestones as well as versioned releases. The repository contains published releases for v1.2.1, v1.2.2, v1.2.4, and v1.2.5; no v1.2.3 release or tag was found in the available history.
+This history is compiled from the project’s Git commits and published GitHub Releases, from the first repository commit on September 4, 2026. It records development milestones as well as versioned releases. Published versions include v1.2.1, v1.2.2, v1.2.4, v1.2.5, v1.2.6, and v1.2.71; no v1.2.3 release or tag was found in the available history.
+
+## v1.2.71 — September 2026
+
+- Fixed the Coast FIRE indicator to include planned personal and employer contributions and contribution phases until the retirement age, matching the chart. Previously it assumed all contributions stopped immediately and could report failure despite a funded retirement in the chart.
+- Clarified the indicator’s contribution assumptions in its explanation.
+
+## v1.2.6 — September 2026
 
 ## v1.2.6 — September 2026
 
