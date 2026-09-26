@@ -23,6 +23,7 @@ const scenario = (id: string, name: string, color: string, overrides: Scenario['
 
 export const defaultData: AppData = {
   version: 1,
+  contributionInputMode: 'amount',
   profile: {
     name: 'FIRE at 50 – Base Plan', currentAge: 30, retirementAge: 50, annualSpending: 52500,
     withdrawalRate: 0.035, customFireNumber: null, realReturn: 0.05, nominalReturn: 0.07625,

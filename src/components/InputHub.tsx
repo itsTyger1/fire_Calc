@@ -3,6 +3,8 @@ import { ChevronDown, Copy, Plus, RefreshCcw, Trash2 } from 'lucide-react';
 import type { AppData, Scenario } from '../domain/types';
 import { scenarioColors } from '../domain/defaults';
 import { applyScenarioOverrides, isTakeHomeBudgetAccount, scenarioBudgetMetrics } from '../domain/calculations';
+import { addAccountToData, createNewAccount, removeAccountFromData } from '../domain/accounts';
+import { copyMonthlyPhaseValues, resetMonthlyPhaseValues } from '../domain/budget';
 import { AccountsEditor, BudgetEditor, ProfileEditor } from './Editors';
 import { RothEditor } from './RothEditor';
 import { CommittedNumberInput, Field, money, SelectField, Toggle } from './ui';
@@ -29,12 +31,16 @@ export function InputHub({ data, setData, scenario, setSelected, phaseId, setPha
   const pendingRenameId = useRef<string | null>(null);
   const [scenarioAction, setScenarioAction] = useState<{ kind: 'delete' | 'reset'; id: string; name: string } | null>(null);
   const scenarioDialogRef = useRef<HTMLDialogElement>(null);
+  const [copyPhaseDialogOpen, setCopyPhaseDialogOpen] = useState(false);
+  const [copyPhaseSourceId, setCopyPhaseSourceId] = useState('');
+  const copyPhaseDialogRef = useRef<HTMLDialogElement>(null);
   const budget = scenarioBudgetMetrics(data, scenario, 1, phaseId);
   const effective = applyScenarioOverrides(data, scenario);
   const patchScenario = (patch: Partial<Scenario>) => setData((old) => ({ ...old, scenarios: old.scenarios.map((item) => item.id === scenario.id ? { ...item, ...patch } : item) }));
   const patchOverride = (patch: Scenario['overrides']) => patchScenario({ overrides: { ...scenario.overrides, ...patch } });
   useEffect(() => setScenarioDraftName(scenario.name), [scenario.id, scenario.name]);
   useEffect(() => { if (scenarioAction) scenarioDialogRef.current?.showModal(); }, [scenarioAction]);
+  useEffect(() => { if (copyPhaseDialogOpen) copyPhaseDialogRef.current?.showModal(); }, [copyPhaseDialogOpen]);
   useLayoutEffect(() => {
     if (scenarioAction || pendingRenameId.current !== scenario.id) return;
     pendingRenameId.current = null;
@@ -122,13 +128,29 @@ export function InputHub({ data, setData, scenario, setSelected, phaseId, setPha
     setData((old) => ({ ...old, scenarios: [...old.scenarios, next] }));
     setSelected(next.id);
   };
-  const resetBudget = () => setData((old) => ({ ...old, scenarios: old.scenarios.map((item) => {
-    if (item.id !== scenario.id) return item;
-    const { budgetAmounts: _budget, ...overrides } = item.overrides;
-    const phaseContributions = { ...overrides.phaseContributions };
-    if (budget.phase) delete phaseContributions[budget.phase.id];
-    return { ...item, overrides: { ...overrides, phaseContributions } };
-  }) }));
+  const resetBudget = () => setData((old) => resetMonthlyPhaseValues(old, scenario.id, budget.phase.id));
+  const copyPhaseValues = () => {
+    if (!copyPhaseSourceId || copyPhaseSourceId === budget.phase.id) return;
+    setData((old) => copyMonthlyPhaseValues(old, scenario.id, copyPhaseSourceId, budget.phase.id));
+    copyPhaseDialogRef.current?.close();
+    setCopyPhaseDialogOpen(false);
+  };
+  const addMonthlyAccount = () => {
+    const account = createNewAccount();
+    setData((old) => addAccountToData(old, account));
+  };
+  const renameMonthlyAccount = (accountId: string, name: string) => setData((old) => ({
+    ...old,
+    accounts: old.accounts.map((account) => account.id === accountId ? { ...account, name } : account),
+  }));
+  const removeMonthlyAccount = (accountId: string) => {
+    const account = data.accounts.find((item) => item.id === accountId);
+    if (!account) return;
+    const hasCashTrigger = data.phases.some((phase) => phase.startsWhen.kind === 'cashTarget' && phase.startsWhen.accountId === accountId);
+    const triggerNote = hasCashTrigger ? ' A phase that waits for this account to reach a cash target will start immediately.' : '';
+    if (!window.confirm(`Delete ${account.name}? Its monthly contributions and Roth transfers that use it will be removed.${triggerNote}`)) return;
+    setData((old) => removeAccountFromData(old, accountId));
+  };
 
   return <section id="inputs" className="input-hub" aria-labelledby="input-heading">
     {scenarioAction && <dialog ref={scenarioDialogRef} className="update-modal scenario-confirmation" aria-labelledby="scenario-confirmation-title" onCancel={(event) => { event.preventDefault(); closeScenarioDialog(); }}>
@@ -137,6 +159,17 @@ export function InputHub({ data, setData, scenario, setSelected, phaseId, setPha
       <div className="update-modal-actions">
         <button type="button" autoFocus className="button secondary" onClick={closeScenarioDialog}>Cancel</button>
         <button type="button" className="button danger" onClick={confirmScenarioAction}>{scenarioAction.kind === 'delete' ? 'Delete scenario' : 'Reset scenario'}</button>
+      </div>
+    </dialog>}
+    {copyPhaseDialogOpen && <dialog ref={copyPhaseDialogRef} className="update-modal scenario-confirmation" aria-labelledby="copy-phase-title" onCancel={(event) => { event.preventDefault(); copyPhaseDialogRef.current?.close(); setCopyPhaseDialogOpen(false); }}>
+      <h2 id="copy-phase-title">Copy monthly values</h2>
+      <p>Copy income, expenses, and account contributions from another phase into “{budget.phase.name}”? This overwrites those values for the selected scenario. Income is shared across scenarios.</p>
+      <SelectField label="Copy values from" value={copyPhaseSourceId} onChange={setCopyPhaseSourceId}>
+        {data.phases.filter((phase) => phase.id !== budget.phase.id).map((phase) => <option key={phase.id} value={phase.id}>{phase.name}</option>)}
+      </SelectField>
+      <div className="update-modal-actions">
+        <button type="button" autoFocus className="button secondary" onClick={() => { copyPhaseDialogRef.current?.close(); setCopyPhaseDialogOpen(false); }}>Cancel</button>
+        <button type="button" className="button primary" disabled={!copyPhaseSourceId} onClick={copyPhaseValues}><Copy size={14} /> Copy values</button>
       </div>
     </dialog>}
     <div className="input-intro"><div><span className="eyebrow">Set up once. Explore below.</span><h1 id="input-heading">Your FIRE plan</h1><p>All your inputs in one place. Press <kbd>Enter</kbd> to apply a number; <kbd>Esc</kbd> to cancel. Changes save automatically.</p></div><a href="#results" className="button primary">View results ↓</a></div>
@@ -172,10 +205,14 @@ export function InputHub({ data, setData, scenario, setSelected, phaseId, setPha
         </div></details>
       </>}
       {tab === 'money' && <>
-        <div className="input-section-heading"><div><h2>Monthly take-home budget</h2><p>Enter expenses once. Deposited take-home and contributions are saved by contribution phase.</p></div><button className="button ghost" onClick={() => { if (window.confirm('Reset this scenario’s expenses and the selected phase’s contributions?')) resetBudget(); }}><RefreshCcw size={14} /> Reset monthly amounts</button></div>
+        <div className="input-section-heading monthly-money-heading"><div><h2>Monthly take-home budget</h2><p>Income, expenses, and contributions are saved by contribution phase. Income is shared across scenarios.</p></div><button className="button ghost" onClick={() => { if (window.confirm(`Reset ${budget.phase.name} income, expenses, and contributions for ${scenario.name}? Income is shared across scenarios.`)) resetBudget(); }}><RefreshCcw size={14} /> Reset phase amounts</button></div>
+        <div className="monthly-phase-controls">
+          <SelectField label="Contribution phase" value={budget.phase.id} onChange={setPhaseId}>{data.phases.map((phase) => <option key={phase.id} value={phase.id}>{phase.name}</option>)}</SelectField>
+          <button type="button" className="button secondary" disabled={data.phases.length < 2} onClick={() => { setCopyPhaseSourceId(data.phases.find((phase) => phase.id !== budget.phase.id)?.id ?? ''); setCopyPhaseDialogOpen(true); }}><Copy size={14} /> Copy another phase</button>
+        </div>
         <div className="budget-live-total" role="status"><div><span>Deposited take-home</span><strong>{money(budget.takeHomeIncome)}</strong></div><div><span>Expenses</span><strong>− {money(budget.needs + budget.wants)}</strong></div><div><span>Take-home savings & investments</span><strong>− {money(budget.takeHomeContributions)}</strong></div><div className={budget.remaining < 0 ? 'negative-text' : budget.remaining > 0 ? 'unassigned-text' : 'positive-text'}><span>{budget.remaining < 0 ? 'Over budget' : 'Unassigned take-home'}</span><strong>{money(Math.abs(budget.remaining))}</strong></div></div>
         <div className="monthly-input-grid"><div><h3>Income & expenses</h3><BudgetEditor data={data} setData={setData} scenario={scenario} budget={budget} /></div><div><h3>Investments & savings</h3>
-          <ContributionsEditor data={data} setData={setData} scenario={scenario} phaseId={phaseId} setPhaseId={setPhaseId} />
+          <ContributionsEditor data={data} setData={setData} scenario={scenario} phaseId={phaseId} onAddAccount={addMonthlyAccount} onRemoveAccount={removeMonthlyAccount} onRenameAccount={renameMonthlyAccount} />
         </div></div>
       </>}
       {tab === 'accounts' && <><div className="input-section-heading"><h2>Account balances & details</h2><p>Shared across scenarios. Monthly contributions are entered in Monthly money.</p></div><AccountsEditor data={data} setData={setData} /><RothEditor data={data} setData={setData} scenario={scenario} /></>}
@@ -183,8 +220,9 @@ export function InputHub({ data, setData, scenario, setSelected, phaseId, setPha
   </section>;
 }
 
-function ContributionsEditor({ data, setData, scenario, phaseId, setPhaseId }: {
-  data: AppData; setData: Setter; scenario: Scenario; phaseId?: string; setPhaseId: (id: string) => void;
+function ContributionsEditor({ data, setData, scenario, phaseId, onAddAccount, onRemoveAccount, onRenameAccount }: {
+  data: AppData; setData: Setter; scenario: Scenario; phaseId?: string;
+  onAddAccount: () => void; onRemoveAccount: (accountId: string) => void; onRenameAccount: (accountId: string, name: string) => void;
 }) {
   const budget = scenarioBudgetMetrics(data, scenario, 1, phaseId);
   const phase = budget.phase;
@@ -198,15 +236,35 @@ function ContributionsEditor({ data, setData, scenario, phaseId, setPhaseId }: {
   if (!phase) return <p className="muted">Add a contribution phase to edit monthly contributions.</p>;
   const trigger = phase.startsWhen;
   const triggerText = trigger.kind === 'always' ? 'Starts immediately' : trigger.kind === 'cashTarget' ? `Starts when ${data.accounts.find((account) => account.id === trigger.accountId)?.name ?? 'cash'} reaches ${money(trigger.amount)}` : trigger.kind === 'age' ? `Starts at age ${trigger.age}` : `Starts on ${trigger.date}`;
+  const inputMode = data.contributionInputMode ?? 'amount';
+  const percentageBase = budget.takeHomeIncome;
+  const inputValue = (amount: number) => inputMode === 'percent'
+    ? percentageBase > 0 ? Math.round(amount / percentageBase * 10000) / 100 : 0
+    : Math.round(amount * 100) / 100;
+  const commitContribution = (accountId: string, key: 'personal' | 'employer', value: number) => {
+    const amount = inputMode === 'percent'
+      ? Math.round(value * percentageBase) / 100
+      : value;
+    update(accountId, key, amount);
+  };
   return <div className="editor-stack">
-    <SelectField label="Contribution phase" value={phase.id} onChange={setPhaseId}>{data.phases.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</SelectField>
-    <p className="muted">{triggerText}. The budget breakdown below shows this phase; the FIRE projection follows all phases.</p>
-    <div className="monthly-contributions"><div className="monthly-contribution-head"><span>Account</span><span>You / month</span><span>Employer / month</span></div>
-      {[...budget.rows].sort((a, b) => Number(isTakeHomeBudgetAccount(b.account)) - Number(isTakeHomeBudgetAccount(a.account))).map((row) => <div className="monthly-contribution-row" key={row.account.id}><div><strong>{row.account.name}</strong><small>{row.isPayroll ? 'Payroll · already withheld' : 'Deducted from take-home'}</small></div>
-        <span className="mini-money">$<CommittedNumberInput ariaLabel={`${row.account.name} monthly contribution`} min={0} value={Math.round(row.personal * 100) / 100} onCommit={(value) => update(row.account.id, 'personal', value)} /></span>
-        <span className="mini-money">$<CommittedNumberInput ariaLabel={`${row.account.name} employer contribution`} min={0} value={Math.round(row.employer * 100) / 100} onCommit={(value) => update(row.account.id, 'employer', value)} /></span>
+    <p className="muted">{triggerText}. These contributions apply to {phase.name}; the FIRE projection follows all phases.</p>
+    <div className="contribution-input-controls">
+      <span>Enter contributions as</span>
+      <div className="segmented" role="group" aria-label="Contribution input unit">
+        <button type="button" aria-pressed={inputMode === 'amount'} className={inputMode === 'amount' ? 'active' : ''} onClick={() => setData((old) => ({ ...old, contributionInputMode: 'amount' }))}>Dollar amounts</button>
+        <button type="button" aria-pressed={inputMode === 'percent'} className={inputMode === 'percent' ? 'active' : ''} disabled={percentageBase <= 0} onClick={() => setData((old) => ({ ...old, contributionInputMode: 'percent' }))}>Percent of take-home</button>
+      </div>
+    </div>
+    <p className="muted contribution-input-note">Percentages use deposited take-home for the selected phase ({money(percentageBase)}/month). Switching units keeps the saved contribution amounts unchanged; values update when you edit them. {percentageBase <= 0 && 'Enter deposited take-home above $0 to use percentage inputs.'}</p>
+    <div className="monthly-contributions"><div className="monthly-contribution-head"><span>Account</span><span>You / month</span><span>Employer / month</span><span /></div>
+      {[...budget.rows].sort((a, b) => Number(isTakeHomeBudgetAccount(b.account)) - Number(isTakeHomeBudgetAccount(a.account))).map((row) => <div className="monthly-contribution-row" key={row.account.id}><div><input className="contribution-account-name" aria-label={`${row.account.name} account name`} value={row.account.name} onChange={(event) => onRenameAccount(row.account.id, event.target.value)} /><small>{row.isPayroll ? 'Payroll · already withheld' : 'Deducted from take-home'}</small></div>
+        <span className="mini-money">{inputMode === 'amount' ? '$' : ''}<CommittedNumberInput ariaLabel={`${row.account.name} monthly personal contribution, ${inputMode === 'percent' ? 'percent of deposited take-home' : 'dollars'}`} min={0} step={inputMode === 'percent' ? 0.1 : 1} value={inputValue(row.personal)} readOnly={inputMode === 'percent' && percentageBase <= 0} onCommit={(value) => commitContribution(row.account.id, 'personal', value)} />{inputMode === 'percent' ? '%' : ''}</span>
+        <span className="mini-money">{inputMode === 'amount' ? '$' : ''}<CommittedNumberInput ariaLabel={`${row.account.name} monthly employer contribution, ${inputMode === 'percent' ? 'percent of deposited take-home' : 'dollars'}`} min={0} step={inputMode === 'percent' ? 0.1 : 1} value={inputValue(row.employer)} readOnly={inputMode === 'percent' && percentageBase <= 0} onCommit={(value) => commitContribution(row.account.id, 'employer', value)} />{inputMode === 'percent' ? '%' : ''}</span>
+        <button type="button" className="icon-button danger" aria-label={`Delete ${row.account.name}`} title={`Delete ${row.account.name}`} onClick={() => onRemoveAccount(row.account.id)}><Trash2 size={15} /></button>
       </div>)}
     </div>
+    <button type="button" className="add-card" onClick={onAddAccount}><Plus size={18} /> Add account</button>
     <p className="fine-print">Personal contributions to non-payroll accounts reduce unassigned take-home in every phase. Payroll 401(k) and employer contributions are already withheld or paid separately and are not deducted again.</p>
   </div>;
 }

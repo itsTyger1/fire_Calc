@@ -445,6 +445,11 @@ export const emergencyFundMetrics = (cash: number, target: number, monthlySaving
 // reaches the user's bank account, so they are intentionally excluded.
 export const isTakeHomeBudgetAccount = (account: Account) => !account.type.includes('401(k)');
 
+export const scenarioBudgetAmount = (scenario: Scenario, phaseId: string, item: AppData['budget'][number]) =>
+  scenario.overrides.phaseBudgetAmounts?.[phaseId]?.[item.id]
+    ?? scenario.overrides.budgetAmounts?.[item.id]
+    ?? item.amount;
+
 export const scenarioBudgetMetrics = (data: AppData, scenario: Scenario, fireContributionScale = 1, phaseId?: string): ScenarioBudgetMetrics => {
   const { profile, accounts, phases } = applyScenarioOverrides(data, scenario);
   const balances = Object.fromEntries(accounts.map((account) => [account.id, account.balance]));
@@ -455,7 +460,7 @@ export const scenarioBudgetMetrics = (data: AppData, scenario: Scenario, fireCon
     const personal = isScalableFireAccount(account) ? amount.personal * Math.max(0, fireContributionScale) : amount.personal;
     return { account, personal, employer: amount.employer, isPayroll: account.type.includes('401(k)') };
   });
-  const budgetAmount = (item: AppData['budget'][number]) => scenario.overrides.budgetAmounts?.[item.id] ?? item.amount;
+  const budgetAmount = (item: AppData['budget'][number]) => scenarioBudgetAmount(scenario, phase.id, item);
   const needs = data.budget.filter((item) => item.category === 'Needs').reduce((sum, item) => sum + budgetAmount(item), 0);
   const wants = data.budget.filter((item) => item.category === 'Wants').reduce((sum, item) => sum + budgetAmount(item), 0);
   const includedRows = rows.filter((row) => row.account.includeInNetWorth);

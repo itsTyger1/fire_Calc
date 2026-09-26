@@ -1,5 +1,5 @@
 import type { AppData, Scenario, ScenarioBudgetMetrics } from '../domain/types';
-import { isTakeHomeBudgetAccount } from '../domain/calculations';
+import { isTakeHomeBudgetAccount, scenarioBudgetAmount } from '../domain/calculations';
 import { money, percent, Section } from './ui';
 export function BudgetSummary({ data, selectedScenario, selectedBudget, comparisonBudgets, setSelected }: {
   data: AppData; selectedScenario: Scenario; selectedBudget: ScenarioBudgetMetrics;
@@ -7,7 +7,7 @@ export function BudgetSummary({ data, selectedScenario, selectedBudget, comparis
 }) {
   const base = { scenario: selectedScenario };
   const allocationRows = [
-    ...data.budget.map((item) => { const amount = selectedScenario.overrides.budgetAmounts?.[item.id] ?? item.amount; return { id: item.id, kind: 'budget' as const, group: item.category, name: item.name, planned: amount }; }),
+    ...data.budget.map((item) => { const amount = scenarioBudgetAmount(selectedScenario, selectedBudget.phase.id, item); return { id: item.id, kind: 'budget' as const, group: item.category, name: item.name, planned: amount }; }),
     ...selectedBudget.rows.filter((row) => isTakeHomeBudgetAccount(row.account)).map((row) => ({
       id: row.account.id,
       kind: 'personal' as const,
@@ -24,7 +24,10 @@ export function BudgetSummary({ data, selectedScenario, selectedBudget, comparis
     { id: 'take-home', kind: 'income' as const, group: 'Zero-based take-home', name: 'Deposited take-home assigned' },
   ];
   const comparisonValue = (row: typeof comparisonRows[number], scenario: Scenario, budget: typeof selectedBudget) => {
-    if (row.kind === 'budget') return scenario.overrides.budgetAmounts?.[row.id] ?? data.budget.find((item) => item.id === row.id)?.amount ?? 0;
+    if (row.kind === 'budget') {
+      const item = data.budget.find((candidate) => candidate.id === row.id);
+      return item ? scenarioBudgetAmount(scenario, budget.phase.id, item) : 0;
+    }
     if (row.kind === 'remaining') return budget.remaining;
     if (row.kind === 'income') return budget.takeHomeIncome;
     const accountRow = budget.rows.find((item) => item.account.id === row.id);

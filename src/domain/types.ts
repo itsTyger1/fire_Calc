@@ -107,6 +107,7 @@ export interface ScenarioOverrides {
   contributions?: Record<string, Partial<ContributionAmount>>;
   phaseContributions?: Record<string, Record<string, Partial<ContributionAmount>>>;
   budgetAmounts?: Record<string, number>;
+  phaseBudgetAmounts?: Record<string, Record<string, number>>;
   accountReturns?: Record<string, number | undefined>;
   includeCashInFire?: boolean;
   includeCryptoInFire?: boolean;
@@ -138,6 +139,7 @@ export interface Scenario {
 
 export interface AppData {
   version: 1;
+  contributionInputMode?: 'amount' | 'percent';
   profile: Profile;
   accounts: Account[];
   phases: ContributionPhase[];

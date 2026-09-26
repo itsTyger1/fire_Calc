@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { defaultData } from '../src/domain/defaults';
+import { addAccountToData, removeAccountFromData } from '../src/domain/accounts';
+import { copyMonthlyPhaseValues, resetMonthlyPhaseValues } from '../src/domain/budget';
 import {
   aggregateAccounts, annualToMonthlyRate, applyScenarioOverrides, calculateFireNumber, calculateCoastFire,
   bridgeMetrics, emergencyFundMetrics, findFireCrossing, growAccountOneMonth, projectCore,
@@ -201,6 +203,90 @@ describe('financial calculations', () => {
     expect(metrics.needs).toBe(2103);
     expect(metrics.wants).toBe(715);
     expect(defaultData.budget.find((item) => item.id === 'housing')?.amount).toBe(1935);
+  });
+  it('uses phase-specific expenses while preserving legacy scenario expense overrides as fallbacks', () => {
+    const data = structuredClone(defaultData);
+    const housing = data.budget.find((item) => item.id === 'housing')!;
+    const scenario = {
+      ...data.scenarios[0],
+      overrides: {
+        budgetAmounts: { housing: 1500 },
+        phaseBudgetAmounts: { 'phase-emergency': { housing: 1300 } },
+      },
+    };
+    const emergency = scenarioBudgetMetrics(data, scenario, 1, 'phase-emergency');
+    const fire = scenarioBudgetMetrics(data, scenario, 1, 'phase-fire');
+    expect(emergency.needs).toBe(fire.needs - 200);
+    expect(fire.needs).toBe(defaultData.budget.filter((item) => item.category === 'Needs').reduce((sum, item) => sum + (item.id === housing.id ? 1500 : item.amount), 0));
+  });
+  it('removes account references and activates phases that depended on its cash balance', () => {
+    const data = structuredClone(defaultData);
+    data.scenarios[0].overrides = {
+      accountBalances: { hysa: 50000 },
+      accountReturns: { hysa: 0.03 },
+      contributions: { hysa: { personal: 100 } },
+      phaseContributions: { 'phase-fire': { hysa: { personal: 250 } } },
+    };
+    data.profile.rothTransfers = [{ id: 'cash-transfer', kind: 'conversion', age: 30, sourceId: 'hysa', destinationId: 'roth-ira', amount: 100, basis: 0, taxRate: 0, taxAccountId: 'hysa' }];
+    const result = removeAccountFromData(data, 'hysa');
+    expect(result.accounts.some((item) => item.id === 'hysa')).toBe(false);
+    expect(result.phases.find((phase) => phase.id === 'phase-fire')?.startsWhen).toEqual({ kind: 'always' });
+    expect(result.phases.every((phase) => !('hysa' in phase.contributions))).toBe(true);
+    expect(result.scenarios[0].overrides.accountBalances).not.toHaveProperty('hysa');
+    expect(result.scenarios[0].overrides.accountReturns).not.toHaveProperty('hysa');
+    expect(result.scenarios[0].overrides.contributions).not.toHaveProperty('hysa');
+    expect(result.scenarios[0].overrides.phaseContributions?.['phase-fire']).not.toHaveProperty('hysa');
+    expect(result.profile.rothTransfers).toEqual([]);
+  });
+  it('adds an account with zero contribution rows in every phase', () => {
+    const data = structuredClone(defaultData);
+    const addedAccount = { ...data.accounts[0], id: 'new-account', name: 'New account', monthlyContribution: 0, employerContribution: 0 };
+    const result = addAccountToData(data, addedAccount);
+    expect(result.accounts.at(-1)).toEqual(addedAccount);
+    expect(result.phases.every((phase) => phase.contributions['new-account']?.personal === 0 && phase.contributions['new-account']?.employer === 0)).toBe(true);
+    expect(data.accounts.some((item) => item.id === 'new-account')).toBe(false);
+  });
+  it('copies income, expenses, and effective contributions from one phase into another', () => {
+    const data = structuredClone(defaultData);
+    const scenario = data.scenarios[0];
+    data.phases.find((phase) => phase.id === 'phase-emergency')!.takeHomeIncome = 5000;
+    scenario.overrides = {
+      budgetAmounts: { housing: 1500 },
+      phaseBudgetAmounts: { 'phase-emergency': { housing: 1300 }, 'phase-fire': { housing: 2000 } },
+      phaseContributions: { 'phase-emergency': { taxable: { personal: 777 } } },
+    };
+    const source = scenarioBudgetMetrics(data, scenario, 1, 'phase-emergency');
+    const result = copyMonthlyPhaseValues(data, scenario.id, 'phase-emergency', 'phase-fire');
+    const copiedScenario = result.scenarios.find((item) => item.id === scenario.id)!;
+    const target = scenarioBudgetMetrics(result, copiedScenario, 1, 'phase-fire');
+    expect(result.phases.find((phase) => phase.id === 'phase-fire')?.takeHomeIncome).toBe(5000);
+    expect(target.needs).toBe(source.needs);
+    expect(target.wants).toBe(source.wants);
+    expect(target.rows.map(({ account, personal, employer }) => [account.id, personal, employer]))
+      .toEqual(source.rows.map(({ account, personal, employer }) => [account.id, personal, employer]));
+    expect(data.phases.find((phase) => phase.id === 'phase-fire')?.takeHomeIncome).toBeUndefined();
+    expect(data.scenarios[0].overrides.phaseBudgetAmounts?.['phase-fire']?.housing).toBe(2000);
+    expect(result.scenarios[1].overrides.phaseBudgetAmounts).toBeUndefined();
+  });
+  it('resets only the selected phase and restores shared default income and expense amounts', () => {
+    const data = structuredClone(defaultData);
+    const scenario = data.scenarios[0];
+    data.phases.find((phase) => phase.id === 'phase-fire')!.takeHomeIncome = 5000;
+    scenario.overrides = {
+      budgetAmounts: { housing: 1500 },
+      phaseBudgetAmounts: { 'phase-emergency': { housing: 1100 }, 'phase-fire': { housing: 1700 } },
+      phaseContributions: { 'phase-emergency': { taxable: { personal: 200 } }, 'phase-fire': { taxable: { personal: 800 } } },
+    };
+    const result = resetMonthlyPhaseValues(data, scenario.id, 'phase-fire');
+    const resetScenario = result.scenarios[0];
+    expect(result.phases.find((phase) => phase.id === 'phase-fire')?.takeHomeIncome).toBeUndefined();
+    expect(scenarioBudgetMetrics(result, resetScenario, 1, 'phase-fire').takeHomeIncome).toBe(data.profile.netMonthlyIncome);
+    expect(scenarioBudgetMetrics(result, resetScenario, 1, 'phase-fire').needs)
+      .toBe(data.budget.filter((item) => item.category === 'Needs').reduce((sum, item) => sum + item.amount, 0));
+    expect(scenarioBudgetMetrics(result, resetScenario, 1, 'phase-emergency').needs)
+      .toBe(data.budget.filter((item) => item.category === 'Needs').reduce((sum, item) => sum + (item.id === 'housing' ? 1100 : item.amount), 0));
+    expect(resetScenario.overrides.phaseContributions?.['phase-fire']).toBeUndefined();
+    expect(resetScenario.overrides.phaseContributions?.['phase-emergency']?.taxable?.personal).toBe(200);
   });
   it('includes contributions and compound growth in each projected account balance', () => {
     const zeroReturn = { ...account, balance: 1000, monthlyContribution: 100, employerContribution: 50, annualReturn: 0 };

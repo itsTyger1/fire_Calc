@@ -32,6 +32,7 @@ const normalizeData = (data: AppData): AppData => {
   const profile = { ...data.profile, realReturn: realReturnFromNominal(data.profile.nominalReturn, data.profile.inflationRate) };
   return {
     ...data,
+    contributionInputMode: data.contributionInputMode === 'percent' ? 'percent' : 'amount',
     profile,
     scenarios: data.scenarios.map((scenario) => {
       const { realReturn, ...overrides } = scenario.overrides;

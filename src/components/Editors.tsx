@@ -2,7 +2,8 @@ import { useState, type Dispatch, type SetStateAction } from 'react';
 import { ArrowDown, ArrowUp, Plus, Trash2, X } from 'lucide-react';
 import type { Account, AccountType, AppData, AssetClass, Scenario, ScenarioBudgetMetrics, TaxTreatment, Accessibility } from '../domain/types';
 import { CommittedNumberInput, Field, SelectField, TextField, Toggle, money, percent } from './ui';
-import { applyScenarioOverrides } from '../domain/calculations';
+import { applyScenarioOverrides, scenarioBudgetAmount } from '../domain/calculations';
+import { addAccountToData, createNewAccount, removeAccountFromData } from '../domain/accounts';
 
 type Setter = Dispatch<SetStateAction<AppData>>;
 const accountTypes: AccountType[] = ['Roth 401(k)', 'Traditional 401(k)', 'After-tax 401(k)', 'Roth IRA', 'Traditional IRA', 'Taxable Brokerage', 'HYSA / Cash', 'Treasury / Bonds', 'Crypto', 'HSA', 'Other'];
@@ -55,14 +56,20 @@ export function ProfileEditor({ data, setData, scenario }: { data: AppData; setD
   </div>;
 }
 
-const newAccount = (): Account => ({ id: crypto.randomUUID(), name: 'New account', type: 'Other', balance: 0, monthlyContribution: 0, employerContribution: 0, fireEligible: true, includeInNetWorth: true, taxTreatment: 'Other', accessibility: 'Immediate', notes: '', holdings: [] });
-
 export function AccountsEditor({ data, setData }: { data: AppData; setData: Setter }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const updateAccount = (id: string, patch: Partial<Account>) => setData((old) => ({ ...old, accounts: old.accounts.map((account) => account.id === id ? { ...account, ...patch } : account) }));
-  const remove = (id: string) => setData((old) => ({ ...old, accounts: old.accounts.filter((a) => a.id !== id), phases: old.phases.map((phase) => { const next = { ...phase, contributions: { ...phase.contributions } }; delete next.contributions[id]; return next; }) }));
+  const remove = (id: string) => {
+    const account = data.accounts.find((item) => item.id === id);
+    if (!account) return;
+    const hasCashTrigger = data.phases.some((phase) => phase.startsWhen.kind === 'cashTarget' && phase.startsWhen.accountId === id);
+    const triggerNote = hasCashTrigger ? ' A phase that waits for this account to reach a cash target will start immediately.' : '';
+    if (!window.confirm(`Delete ${account.name}? Its monthly contributions and Roth transfers that use it will be removed.${triggerNote}`)) return;
+    setData((old) => removeAccountFromData(old, id));
+    if (expanded === id) setExpanded(null);
+  };
   const move = (index: number, by: number) => setData((old) => { const accounts = [...old.accounts]; const target = index + by; if (target < 0 || target >= accounts.length) return old; [accounts[index], accounts[target]] = [accounts[target], accounts[index]]; return { ...old, accounts }; });
-  const add = () => { const account = newAccount(); setData((old) => ({ ...old, accounts: [...old.accounts, account], phases: old.phases.map((phase) => ({ ...phase, contributions: { ...phase.contributions, [account.id]: { personal: 0, employer: 0 } } })) })); setExpanded(account.id); };
+  const add = () => { const account = createNewAccount(); setData((old) => addAccountToData(old, account)); setExpanded(account.id); };
   const returnModeFor = (account: Account) => account.returnMode ?? (account.type === 'Crypto' ? 'plan' : account.annualReturn === undefined ? 'plan' : 'custom');
 
   return <div className="account-list"><p className="muted">Growth uses the scenario return or your custom account return. Account type does not automatically change return, tax treatment, accessibility, or FIRE eligibility. Tax treatment is descriptive. Scheduled Roth transfers below can estimate conversion tax; other taxes and account-specific withdrawal restrictions are not simulated.</p>
@@ -107,7 +114,10 @@ export function BudgetEditor({ data, setData, scenario, budget }: { data: AppDat
     ...old,
     scenarios: old.scenarios.map((item) => item.id === scenario.id ? {
       ...item,
-      overrides: { ...item.overrides, budgetAmounts: { ...item.overrides.budgetAmounts, [itemId]: amount } },
+      overrides: { ...item.overrides, phaseBudgetAmounts: {
+        ...item.overrides.phaseBudgetAmounts,
+        [budget.phase.id]: { ...item.overrides.phaseBudgetAmounts?.[budget.phase.id], [itemId]: amount },
+      } },
     } : item),
   }));
   const removeBudgetItem = (itemId: string) => setData((old) => ({
@@ -116,7 +126,12 @@ export function BudgetEditor({ data, setData, scenario, budget }: { data: AppDat
     scenarios: old.scenarios.map((item) => {
       const budgetAmounts = { ...(item.overrides.budgetAmounts ?? {}) };
       delete budgetAmounts[itemId];
-      return { ...item, overrides: { ...item.overrides, budgetAmounts } };
+      const phaseBudgetAmounts = Object.fromEntries(Object.entries(item.overrides.phaseBudgetAmounts ?? {}).map(([phaseId, amounts]) => {
+        const next = { ...amounts };
+        delete next[itemId];
+        return [phaseId, next];
+      }));
+      return { ...item, overrides: { ...item.overrides, budgetAmounts, phaseBudgetAmounts } };
     }),
   }));
   const ratioBase = budget.takeHomeIncome > 0 ? budget.takeHomeIncome : 0;
@@ -130,8 +145,8 @@ export function BudgetEditor({ data, setData, scenario, budget }: { data: AppDat
     <div className="segmented" role="group" aria-label="Income and expenses detail"><button aria-pressed={!advanced} className={!advanced ? 'active' : ''} onClick={() => setAdvanced(false)}>Basic</button><button aria-pressed={advanced} className={advanced ? 'active' : ''} onClick={() => setAdvanced(true)}>Advanced</button></div>
     <p className="muted">1. Enter your monthly deposited pay. 2. Fill in monthly expenses below. 3. Assign savings and investments on the right, then check the unassigned amount above.</p>
     <div className="editor-grid"><Field label={`Deposited take-home · ${budget.phase.name}`} value={budget.takeHomeIncome} prefix="$" min={0} onChange={updatePhaseIncome} hint="The amount that reaches your bank account after payroll deductions during the selected contribution phase. Each phase saves its own amount." /></div>
-    <p className="scenario-budget-note">Expense amounts apply to this scenario. Income applies to this phase across all scenarios. Advanced lets you rename, categorize, add, or remove expenses; switching views keeps all amounts.</p>
-    <div className="budget-items">{data.budget.map((item) => { const amount = scenario.overrides.budgetAmounts?.[item.id] ?? item.amount; return <div className={`budget-row ${advanced ? '' : 'budget-row-basic'}`} key={item.id}>{advanced ? <><input aria-label={`${item.name} expense name`} value={item.name} onChange={(e) => setData((old) => ({ ...old, budget: old.budget.map((b) => b.id === item.id ? { ...b, name: e.target.value } : b) }))} /><select aria-label={`${item.name} category`} value={item.category} onChange={(e) => setData((old) => ({ ...old, budget: old.budget.map((b) => b.id === item.id ? { ...b, category: e.target.value as 'Needs' | 'Wants' } : b) }))}><option>Needs</option><option>Wants</option></select></> : <span>{item.name}</span>}<span className="mini-money">$<CommittedNumberInput ariaLabel={`${item.name} monthly expense`} min={0} value={amount} onCommit={(value) => updateScenarioAmount(item.id, value)} /></span>{advanced && <button className="icon-button danger" aria-label={`Remove ${item.name}`} onClick={() => removeBudgetItem(item.id)}><Trash2 size={15} /></button>}</div>; })}</div>
+    <p className="scenario-budget-note">Expenses apply to this scenario and contribution phase. Income applies to the selected phase across all scenarios. Advanced lets you rename, categorize, add, or remove expenses; switching views keeps all amounts.</p>
+    <div className="budget-items">{data.budget.map((item) => { const amount = scenarioBudgetAmount(scenario, budget.phase.id, item); return <div className={`budget-row ${advanced ? '' : 'budget-row-basic'}`} key={item.id}>{advanced ? <><input aria-label={`${item.name} expense name`} value={item.name} onChange={(e) => setData((old) => ({ ...old, budget: old.budget.map((b) => b.id === item.id ? { ...b, name: e.target.value } : b) }))} /><select aria-label={`${item.name} category`} value={item.category} onChange={(e) => setData((old) => ({ ...old, budget: old.budget.map((b) => b.id === item.id ? { ...b, category: e.target.value as 'Needs' | 'Wants' } : b) }))}><option>Needs</option><option>Wants</option></select></> : <span>{item.name}</span>}<span className="mini-money">$<CommittedNumberInput ariaLabel={`${item.name} monthly expense`} min={0} value={amount} onCommit={(value) => updateScenarioAmount(item.id, value)} /></span>{advanced && <button className="icon-button danger" aria-label={`Remove ${item.name}`} onClick={() => removeBudgetItem(item.id)}><Trash2 size={15} /></button>}</div>; })}</div>
     {advanced && <button className="add-card" onClick={() => setData((old) => ({ ...old, budget: [...old.budget, { id: crypto.randomUUID(), name: 'New expense', category: 'Needs', amount: 0 }] }))}><Plus size={18} /> Add budget item</button>}
     {advanced && <div className="budget-ratios" aria-label="Budget ratios"><div className="budget-ratios-heading"><strong>Budget ratios</strong><span>Calculated from deposited take-home · read-only</span></div>{budgetRatios.map(({ label, amount }) => <div className="budget-ratio" key={label}><span>{label}</span><strong>{percent(ratio(amount))}</strong><small>{money(amount)} / month</small></div>)}</div>}
   </div>;

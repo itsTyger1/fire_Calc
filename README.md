@@ -80,6 +80,7 @@ The UI test checks input placement, read-only results, Enter-only commits, budge
 ## Projection conventions
 
 - Contributions are added at the beginning of each month before investment returns.
+- Monthly investment and savings contributions can be entered as dollar amounts or as a percentage of deposited take-home for the selected phase; the projection stores and uses the equivalent dollar amount.
 - Monthly return is `(1 + annualRate)^(1/12) - 1`.
 - Real-dollar mode holds the FIRE target constant; nominal mode inflates it monthly.
 - The projection follows all contribution phases, independent of the phase selected for budget editing.

@@ -56,6 +56,9 @@ a.button { text-decoration: none; }
 .input-panel { padding: 26px 28px; }
 .input-section-heading { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; align-items: center; }
 .input-section-heading h2 { font-size: 19px; margin: 0 0 5px; }
+.monthly-phase-controls { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; margin: -8px 0 20px; }
+.monthly-phase-controls .field { width: min(280px, 100%); margin: 0; }
+.monthly-phase-controls .button { min-height: 38px; }
 .monthly-input-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
 .monthly-input-grid > div { min-width: 0; }
 .monthly-input-grid > div + div { border-left: 1px solid var(--line); padding-left: 28px; }
@@ -65,11 +68,17 @@ a.button { text-decoration: none; }
 .input-panel .muted, .input-panel .fine-print, .input-panel .shared-default-note, .input-panel .scenario-budget-note { font-size: 12px; line-height: 1.65; }
 .return-assumption-note { margin: -10px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .input-panel .budget-row { grid-template-columns: minmax(80px, 1fr) 80px 92px 28px; }
-.monthly-contribution-head, .monthly-contribution-row { display: grid; grid-template-columns: minmax(130px, 1fr) 100px 100px; gap: 10px; align-items: center; }
+.monthly-contribution-head, .monthly-contribution-row { display: grid; grid-template-columns: minmax(130px, 1fr) 100px 100px 32px; gap: 10px; align-items: center; }
 .monthly-contribution-head { color: var(--muted); font-size: 10px; padding: 0 0 10px; }
 .monthly-contribution-row { padding: 12px 0; border-top: 1px solid var(--line); }
 .monthly-contribution-row strong { display: block; font-size: 12px; }
 .monthly-contribution-row small { display: block; color: var(--muted); margin-top: 5px; font-size: 10px; line-height: 1.5; }
+.contribution-account-name { width: 100%; min-width: 0; padding: 4px 2px; color: #e4edef; border: 1px solid transparent; border-radius: 5px; background: transparent; font-size: 12px; font-weight: 700; }
+.contribution-account-name:hover { border-color: #21424d; }
+.contribution-input-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.contribution-input-controls > span { color: #b8d5df; font-size: 12px; }
+.contribution-input-controls .segmented button:disabled { opacity: .45; cursor: not-allowed; }
+.contribution-input-note { margin-top: -8px; }
 .budget-live-total { border: 1px solid #34594f; background: #0b2c28; border-radius: 12px; padding: 18px 22px; margin-bottom: 26px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
 .budget-live-total > div { display: grid; gap: 8px; }
 .budget-live-total span { font-size: 11px; color: #a3c3ba; }
@@ -89,6 +98,7 @@ a.button { text-decoration: none; }
 @media (max-width: 650px) {
   .input-intro { align-items: start; flex-direction: column; }
   .input-intro, .scenario-toolbar, .input-panel { padding: 20px 16px; }
+  .contribution-input-controls { align-items: flex-start; flex-direction: column; }
   .input-tabs { padding: 0 8px; gap: 0; }
   .input-tabs button { padding: 14px 8px; justify-content: center; }
   .input-tabs button > span, .input-tabs small { display: none; }
@@ -97,7 +107,8 @@ a.button { text-decoration: none; }
   .scenario-picker, .scenario-toolbar-actions, .scenario-toolbar > p { grid-column: 1; grid-row: auto; }
   .scenario-options-body { left: 0; right: auto; width: min(320px, 80vw); }
   .budget-live-total { grid-template-columns: 1fr 1fr; }
-  .monthly-contribution-head, .monthly-contribution-row { grid-template-columns: minmax(90px, 1fr) 82px 82px; gap: 5px; }
+  .monthly-phase-controls .field { width: 100%; }
+  .monthly-contribution-head, .monthly-contribution-row { grid-template-columns: minmax(70px, 1fr) 72px 72px 28px; gap: 4px; }
 }
 html { scroll-behavior: smooth; }
 body { margin: 0; min-width: 320px; min-height: 100vh; background: radial-gradient(circle at 80% -5%, rgba(55, 211, 154, .08), transparent 30%), var(--bg); }
