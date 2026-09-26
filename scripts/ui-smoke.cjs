@@ -50,10 +50,21 @@ app.whenReady().then(async () => {
     }, label, value);
     await wait();
   };
-  const inputValue = (label) => evaluate((label) => document.querySelector(`input[aria-label="${label}"]`)?.value, label);
+  const inputValue = (label) => evaluate((label) => {
+    const account = label.match(/^(.*) monthly contribution$/)?.[1];
+    const input = [...document.querySelectorAll('input')].find((element) => {
+      const ariaLabel = element.getAttribute('aria-label');
+      return ariaLabel === label || (account && ariaLabel?.startsWith(`${account} monthly personal contribution,`));
+    });
+    return input?.value;
+  }, label);
   const edit = async (label, value, commit = true) => {
     await evaluate((label, value) => {
-      const input = document.querySelector(`input[aria-label="${label}"]`);
+      const account = label.match(/^(.*) monthly contribution$/)?.[1];
+      const input = [...document.querySelectorAll('input')].find((element) => {
+        const ariaLabel = element.getAttribute('aria-label');
+        return ariaLabel === label || (account && ariaLabel?.startsWith(`${account} monthly personal contribution,`));
+      });
       if (!input) throw new Error(`Missing input: ${label}`);
       input.focus();
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);
