@@ -1,6 +1,6 @@
 # FIRE Projector
 
-FIRE Projector is a local-first FIRE planner built with React and TypeScript, available as a Windows desktop app and a static web app. Plan data stays on the current computer or browser and is not synced to a server. Version 1.1 keeps the existing saved-plan format.
+FIRE Projector is a local-first FIRE planner built with React and TypeScript, available as a Windows desktop app and a static web app. Plan data stays on the current computer or browser and is not synced to a server. Version 1.4 keeps the existing saved-plan format.
 
 In the desktop app, **Save** opens Windows **Save As** in the app’s writable `saves` folder under its user-data directory. Enter a file name and click **Save plan**; you can still choose another folder in the dialog if needed. A confirmation shows the full path to the saved JSON file and stays open until dismissed. The file contains the complete plan, its name, and save time. **Load** lists the plan files found in the app’s `saves` folder. Canceling the dialog saves nothing. The web version keeps named saves in browser storage and identifies that location in its confirmation.
 

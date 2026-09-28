@@ -2,6 +2,16 @@
 
 This history is compiled from the project’s Git commits and published GitHub Releases, from the first repository commit on September 4, 2026. It records development milestones as well as versioned releases. Published versions include v1.2.1, v1.2.2, v1.2.4, v1.2.5, v1.2.6, v1.2.71, and v1.2.72; no v1.2.3 release or tag was found in the available history.
 
+## v1.4.0 — September 28, 2026
+
+- Added a minimal black interface shared by the web and Windows apps, with pastel chart colors that brighten on hover, touch, and when a section is prominent on screen.
+- Highlighted individual chart lines, bars, and pie segments together with their matching legend and tooltip markers. Made timeline tooltips draggable on touch screens and moved pie/bar values out of the chart artwork.
+- Added iPhone Home Screen support, app icons, and a Refresh app control that preserves applied inputs and named saves while loading the latest web deployment.
+- Updated the tiger artwork to white on black with burnt-orange eyes and flames, including matching Windows installer and shortcut icons.
+- Added controls to delete old named saves in both browser storage and the desktop app's save folder.
+- New plans and Reset use zero amounts, 10% nominal return, 3.2% inflation, 4% withdrawal rate, and maximum projection age 100. Reset opens Plan and preserves named saves.
+- Updated desktop regression checks for the blank initial planner and restored defaults, while keeping populated budgeting and scenario-editing coverage.
+
 ## v1.2.72 — September 2026
 
 - Replaced native scenario delete/reset confirmations with in-app dialogs, keeping name editing and cursor focus working after list changes, confirmation, and cancellation. Added repeated mouse and keyboard regression checks for these flows.
