@@ -27,12 +27,18 @@ export function CommittedNumberInput({ value, onCommit, min, max, step = 1, aria
 }) {
   const [draft, setDraft] = useState(() => numberText(value));
   const inputRef = useRef<HTMLInputElement>(null);
+  const editedRef = useRef(false);
 
   useEffect(() => {
     if (document.activeElement !== inputRef.current) setDraft(numberText(value));
   }, [value]);
 
   const commit = () => {
+    // Only apply edits: focusing an untouched zero must not clamp it to min.
+    // Clear this synchronously so Enter followed by blur cannot commit twice,
+    // and Escape can blur without applying the draft it just canceled.
+    if (!editedRef.current || readOnly) return;
+    editedRef.current = false;
     const parsed = draft.trim() === '' ? 0 : Number(draft);
     if (!Number.isFinite(parsed)) {
       setDraft(numberText(value));
@@ -40,7 +46,7 @@ export function CommittedNumberInput({ value, onCommit, min, max, step = 1, aria
     }
     const next = Math.min(max ?? Infinity, Math.max(min ?? -Infinity, parsed));
     setDraft(numberText(next));
-    onCommit(next);
+    if (next !== value) onCommit(next);
   };
   const pending = draft !== numberText(value);
 
@@ -49,7 +55,7 @@ export function CommittedNumberInput({ value, onCommit, min, max, step = 1, aria
     className={[className, pending ? 'pending-value' : ''].filter(Boolean).join(' ')}
     aria-label={ariaLabel}
     aria-readonly={readOnly || undefined}
-    title="Press Enter to apply this value. Press Escape to cancel."
+    title="Changes save when you leave this field or press Enter. Press Escape to cancel."
     type="number"
     value={draft}
     readOnly={readOnly}
@@ -57,15 +63,16 @@ export function CommittedNumberInput({ value, onCommit, min, max, step = 1, aria
     step={step}
     min={min}
     max={max}
-    onChange={(event) => setDraft(event.target.value)}
+    onChange={(event) => { editedRef.current = true; setDraft(event.target.value); }}
     onFocus={(event) => event.currentTarget.select()}
     onClick={(event) => { if (!pending) event.currentTarget.select(); }}
-    onBlur={() => setDraft(numberText(value))}
+    onBlur={commit}
     onKeyDown={(event) => {
       if (event.key === 'Enter') {
         event.preventDefault();
         commit();
       } else if (event.key === 'Escape') {
+        editedRef.current = false;
         setDraft(numberText(value));
         event.currentTarget.blur();
       }

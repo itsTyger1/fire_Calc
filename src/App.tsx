@@ -211,7 +211,14 @@ export default function App() {
       : contributionDifference > 0
         ? `${money(contributionDifference)}/mo above amount needed`
         : `${money(-contributionDifference)}/mo more needed`;
-  return <div className="app-shell">
+  return <div className="app-shell" onPointerDownCapture={(event) => {
+    // Safari can keep an input focused when a user taps a non-focusable area.
+    // Blur outside the field so touch and mouse edits use the same save path.
+    const active = document.activeElement;
+    if (!(active instanceof HTMLInputElement) && !(active instanceof HTMLTextAreaElement)) return;
+    const field = active.closest('.field') ?? active;
+    if (event.target instanceof Node && !field.contains(event.target)) active.blur();
+  }}>
     <header className="topbar">
       <div className="brand"><span><img src="./icons/tiger-white-orange-192.png" alt="" width={34} height={34} /></span><div><strong>FIRE Projector <span className="app-version">v{appVersion}</span></strong><small>{data.profile.mode === 'real' ? 'Today’s dollars' : 'Future nominal dollars'}</small></div></div>
       <div className="top-actions">
@@ -238,7 +245,7 @@ export default function App() {
 
     <main className="workspace">
       {!window.fireUpdater && <div className="web-app-tools"><button className="button ghost" onClick={handleRefresh} title="Load the latest app while keeping your saved plans"><RefreshCcw size={16} /> Refresh app</button></div>}
-      <InputHub key={inputRevision} initialTab={inputRevision > 0 ? 'plan' : 'money'} data={data} setData={setData} scenario={selectedScenario} setSelected={setSelected} phaseId={fireInvestingPhaseId} setPhaseId={setPhaseId} />
+      <InputHub key={inputRevision} data={data} setData={setData} scenario={selectedScenario} setSelected={setSelected} phaseId={fireInvestingPhaseId} setPhaseId={setPhaseId} />
       <div id="results" className="results-area">
       {base.profile.currentAge <= 0 || base.profile.retirementAge <= base.profile.currentAge || base.profile.maxAge <= base.profile.retirementAge || !Number.isFinite(base.fireNumber) || base.fireNumber <= 0 ? <Section title="Start your plan" eyebrow="Your results">
         <p className="muted" style={{ padding: '18px 22px 22px', margin: 0 }}>Enter your ages, retirement spending, and withdrawal rate in Plan to see projections.</p>

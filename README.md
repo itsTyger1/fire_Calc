@@ -22,11 +22,13 @@ The Windows app uses the same black interface and minimalist tiger artwork as th
 
 All editable settings are in the input area at the top:
 
+The app opens on **Plan**, including after a refresh or reset, in both the desktop and web versions.
+
 - **Plan:** the selected scenario’s retirement goals, return assumptions, and emergency-fund target. Fields marked shared apply across scenarios.
 - **Monthly money:** deposited take-home, expenses, and every account’s personal and employer contributions. Choose a contribution phase here; the budget breakdown below follows that selection.
 - **Accounts:** shared balances, account types, eligibility, returns, and optional holdings. Contributions have a single editor in Monthly money.
 
-Press **Enter** to apply a numeric edit or **Escape** to cancel. Leaving a numeric field without pressing Enter discards that draft. Applied changes save automatically. All charts, metrics, and budget comparisons appear below the inputs. Use **View results** to jump to the results.
+Numeric edits apply and save automatically when you click or tap outside the field, move to another field, or press **Enter**. Press **Escape** to cancel an unfinished numeric edit. This behavior is shared by the desktop app and the mobile web app. Existing numeric limits still apply. All charts, metrics, and budget comparisons appear below the inputs. Use **View results** to jump to the results.
 
 The take-home formula uses the configured deposited income and all personal non-payroll contributions:
 
@@ -85,7 +87,7 @@ npm run build:portable   # Optional standalone executable
 npm run clean            # Remove generated output; keep only the current installer
 ```
 
-The UI test checks input placement, read-only results, Enter-only commits, budget math, phases, scenario isolation, persistence, and desktop layout. Pass `--capture` directly to `electron scripts/ui-smoke.cjs` to save optional screenshots under ignored `artifacts/`.
+The UI test checks opening on Plan, click-away and touch-pointer commits, Escape cancellation, read-only results, Enter commits, budget math, phases, scenario isolation, persistence, and desktop layout. Pass `--capture` directly to `electron scripts/ui-smoke.cjs` to save optional screenshots under ignored `artifacts/`.
 
 `dist/`, `release/`, `artifacts/`, caches, and dependencies are generated and excluded from source control. Cleanup removes older installers and unpacked builds; it never touches source or the installed app’s saved plan. Run a build again after cleanup before launching a production build or UI test. Only production UI and the desktop entry point are included in installers; tests and developer scripts are excluded.
 

@@ -96,12 +96,13 @@ app.whenReady().then(async () => {
   try {
     const appRoot = process.argv.includes('--packaged') ? 'release/win-unpacked/resources/app.asar' : '.';
     await window.loadFile(path.join(__dirname, '..', appRoot, 'dist', 'index.html')); await wait();
+    // Native click/blur events require focused web contents, even when hidden.
+    window.webContents.focus();
     assert.equal(await evaluate(() => document.querySelector('.app-version')?.textContent), `v${packageVersion}`);
     assert.equal(await evaluate(() => document.querySelectorAll('[role="tab"]').length), 3);
     assert.equal(await evaluate(() => document.querySelectorAll('#results input').length), 0);
     assert.equal(await evaluate(() => document.getElementById('inputs').compareDocumentPosition(document.getElementById('results')) & Node.DOCUMENT_POSITION_FOLLOWING), 4);
-    assert.equal(await inputValue('Taxable Brokerage monthly contribution'), '0');
-    await tab('plan');
+    assert.equal(await evaluate(() => document.getElementById('tab-plan').getAttribute('aria-selected')), 'true');
     const checkDefaults = async () => {
       assert.equal(await inputValue('Current age'), '0');
       assert.equal(await inputValue('Annual retirement spending'), '0');
@@ -112,6 +113,12 @@ app.whenReady().then(async () => {
       assert.equal(await inputValue('Expected real return · calculated'), '6.59');
     };
     await checkDefaults();
+    await evaluate(() => { const input = document.querySelector('[aria-label="Current age"]'); input.focus(); input.blur(); });
+    await wait();
+    assert.equal(await inputValue('Current age'), '0', 'Untouched zero defaults must not be clamped on blur');
+    await tab('money');
+    assert.equal(await inputValue('Taxable Brokerage monthly contribution'), '0');
+    await tab('plan');
     await edit('Expected nominal return', 8);
     await edit('Maximum projection age · shared', 90);
     await tab('money');
@@ -120,6 +127,8 @@ app.whenReady().then(async () => {
     await checkDefaults();
     await evaluate((fixture) => localStorage.setItem('fire-projector-v1', JSON.stringify(fixture)), populatedFixture);
     await window.webContents.reload(); await wait();
+    assert.equal(await evaluate(() => document.getElementById('tab-plan').getAttribute('aria-selected')), 'true');
+    await tab('money');
     assert.equal(await inputValue('Taxable Brokerage monthly contribution'), '850');
     assert.match(await remainder(), /522/);
     assert.equal(await evaluate(() => document.querySelectorAll('.budget-row select').length), 0);
@@ -133,10 +142,30 @@ app.whenReady().then(async () => {
     await capture('monthly-money');
     await edit('Taxable Brokerage monthly contribution', 1000, false);
     assert.match(await remainder(), /522/);
-    window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' });
-    window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' }); await wait();
+    const outsideField = await evaluate(() => {
+      const rect = document.querySelector('.brand').getBoundingClientRect();
+      return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) };
+    });
+    window.webContents.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: 1, ...outsideField });
+    window.webContents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, ...outsideField }); await wait();
+    assert.equal(await inputValue('Taxable Brokerage monthly contribution'), '1000');
     assert.match(await remainder(), /372/);
     assert.match(await evaluate(() => document.querySelector('.zero-sum-adjustment').textContent), /372/);
+    await edit('Taxable Brokerage monthly contribution', 1200, false);
+    window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
+    window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' }); await wait();
+    assert.equal(await inputValue('Taxable Brokerage monthly contribution'), '1000');
+    assert.match(await remainder(), /372/);
+    window.setSize(390, 844); await wait();
+    await edit('Taxable Brokerage monthly contribution', 1100, false);
+    await evaluate(() => document.querySelector('.brand').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch', isPrimary: true })));
+    await wait();
+    assert.equal(await inputValue('Taxable Brokerage monthly contribution'), '1100');
+    assert.match(await remainder(), /272/);
+    await edit('Taxable Brokerage monthly contribution', 1000, false);
+    await evaluate(() => document.activeElement.blur()); await wait();
+    assert.match(await remainder(), /372/);
+    window.setSize(1450, 1050); await wait();
     await edit('Roth 401(k) monthly contribution', 950);
     assert.match(await remainder(), /372/);
     await select('Contribution phase', 'phase-emergency');
@@ -203,6 +232,8 @@ app.whenReady().then(async () => {
     await tab('money');
     assert.equal(await inputValue('Taxable Brokerage monthly contribution'), '1000');
     await window.webContents.reload(); await wait();
+    assert.equal(await evaluate(() => document.getElementById('tab-plan').getAttribute('aria-selected')), 'true');
+    await tab('money');
     assert.equal(await inputValue('Taxable Brokerage monthly contribution'), '1000');
     const clickSave = async () => { await evaluate(() => [...document.querySelectorAll('.top-actions button')].find((el) => el.textContent.trim() === 'Save').click()); await wait(); };
     await clickSave();
@@ -229,7 +260,7 @@ app.whenReady().then(async () => {
     window.setSize(1050, 900); await wait(); await capture('monthly-money-small');
     assert.equal(await evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
     assert.equal(errors.length, 0, errors.join('\n'));
-    console.log('PASS: input ordering, read-only results, Enter-only edits, brokerage math, payroll exclusion, phase selection, scenario isolation, effective plan settings, persistence, and desktop layout.');
+    console.log('PASS: Plan on opening/reset/refresh, zero defaults, click-away and touch-pointer saving, Escape cancellation, Enter edits, budgeting, scenario isolation, persistence, and desktop layout.');
   } catch (error) { console.error(error); code = 1; }
   finally {
     window.destroy();
