@@ -43,7 +43,7 @@ function updater(t, { status = 200, release = {}, spawnError = false, downloadEr
     } },
   };
   vm.runInNewContext(source, { require: (name) => mocks[name] ?? require(name), process, __dirname: path.join(__dirname, '../electron'), URL });
-  return { check: () => handlers['check-for-updates'](), install: (address = url) => handlers['download-and-install-update']({}, address), save: (data) => handlers['save-plan-file']({}, 'My FIRE plan', data), list: () => handlers['list-plan-files'](), dialogOptions: () => dialogOptions, filePath, saveFolder, quit: () => quit, folder };
+  return { check: () => handlers['check-for-updates'](), install: (address = url) => handlers['download-and-install-update']({}, address), save: (data) => handlers['save-plan-file']({}, 'My FIRE plan', data), list: () => handlers['list-plan-files'](), deleteSavedPlan: (id) => handlers['delete-plan-file']({}, id), dialogOptions: () => dialogOptions, filePath, saveFolder, quit: () => quit, folder };
 }
 
 test('an existing 1.1.1 app detects the automated release', async (t) => {
@@ -113,4 +113,15 @@ test('invalid plan data is rejected before opening Save As', async (t) => {
   const app = updater(t);
   await assert.rejects(app.save({}), /Invalid plan data/);
   assert.equal(app.dialogOptions(), undefined);
+});
+test('saved plan deletion removes only the matching file in the app save folder', async (t) => {
+  const app = updater(t);
+  await app.save(plan);
+  const id = (await app.list())[0].id;
+
+  assert.equal(await app.deleteSavedPlan('../../outside-save-folder'), false);
+  assert.equal((await app.list())[0].id, id);
+  assert.equal(await app.deleteSavedPlan(id), true);
+  assert.equal((await app.list()).length, 0);
+  assert.deepEqual(fs.readdirSync(app.saveFolder), []);
 });

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, shell, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, Menu, shell, ipcMain, dialog, nativeTheme } = require('electron');
 const https = require('node:https');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -63,7 +63,8 @@ function createWindow() {
     height: 980,
     minWidth: 1050,
     minHeight: 700,
-    backgroundColor: '#071b24',
+    backgroundColor: '#000000',
+    icon: path.join(__dirname, '..', 'dist', 'icons', 'tiger-white-orange-512.png'),
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
@@ -149,6 +150,33 @@ ipcMain.handle('save-plan-file', async (event, suggestedName, data) => {
 
 ipcMain.handle('list-plan-files', () => listPlanFiles());
 
+ipcMain.handle('delete-plan-file', async (_event, id) => {
+  if (typeof id !== 'string' || !id) return false;
+  const directory = planSavesDirectory();
+  let entries;
+  try {
+    entries = await fs.promises.readdir(directory, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code === 'ENOENT') return false;
+    throw error;
+  }
+  for (const entry of entries) {
+    if (!entry.isFile() || !/\.json$/i.test(entry.name)) continue;
+    const filePath = path.join(directory, entry.name);
+    let saved;
+    try {
+      saved = JSON.parse(await fs.promises.readFile(filePath, 'utf8'));
+    } catch (error) {
+      if (error instanceof SyntaxError || error?.code === 'ENOENT') continue;
+      throw error;
+    }
+    if (saved?.id !== id || !isValidPlanData(saved?.data)) continue;
+    await fs.promises.rm(filePath);
+    return true;
+  }
+  return false;
+});
+
 ipcMain.handle('check-for-updates', async () => {
   let release;
   try {
@@ -189,6 +217,7 @@ ipcMain.handle('download-and-install-update', async (_event, downloadUrl) => {
 Menu.setApplicationMenu(null);
 
 app.whenReady().then(() => {
+  nativeTheme.themeSource = 'dark';
   void fs.promises.mkdir(planSavesDirectory(), { recursive: true });
   createWindow();
   app.on('activate', () => {

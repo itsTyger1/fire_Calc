@@ -1,12 +1,24 @@
 # FIRE Projector
 
-A private Windows desktop planner built with Electron, React, and TypeScript. Your plan is saved locally; Save and Load keep named plan snapshots on this computer. Version 1.1 keeps the existing saved-plan format.
+FIRE Projector is a local-first FIRE planner built with React and TypeScript, available as a Windows desktop app and a static web app. Plan data stays on the current computer or browser and is not synced to a server. Version 1.1 keeps the existing saved-plan format.
 
 In the desktop app, **Save** opens Windows **Save As** in the app’s writable `saves` folder under its user-data directory. Enter a file name and click **Save plan**; you can still choose another folder in the dialog if needed. A confirmation shows the full path to the saved JSON file and stays open until dismissed. The file contains the complete plan, its name, and save time. **Load** lists the plan files found in the app’s `saves` folder. Canceling the dialog saves nothing. The web version keeps named saves in browser storage and identifies that location in its confirmation.
 
 ## Using the app
 
+First-time plans start with zero current and retirement ages, balances, income, spending, holdings, and contribution amounts. Maximum projection age starts at **100**. Three editable assumptions are populated: nominal return **10%**, inflation **3.2%**, and withdrawal rate **4%**. Real return is calculated from nominal return and inflation (about **6.59%** initially). Existing browser data and named saves retain their assumptions. **Reset** restores these same numeric defaults for every scenario, restores the spending-based FIRE goal, and opens the Plan tab. It preserves names, account structure, and named saves.
+
+The nominal-return default is the approximate long-term U.S. stock-market benchmark described by [Fidelity](https://www.fidelity.com/learning-center/trading-investing/sp-500-average-return). Inflation uses the [Minneapolis Fed national CPI history](https://www.minneapolisfed.org/about-us/monetary-policy/inflation-calculator/consumer-price-index-1913-): `(321.9 / 9.9)^(1 / 112) - 1 = 3.1575%` for 1913–2025, rounded to 3.2%. These are fixed, editable historical assumptions; the app makes no requests for financial data when it opens.
+
+### iPhone Home Screen
+
+After the web app is deployed, open its URL in Safari, tap **Share** → **Add to Home Screen**, leave **Open as Web App** enabled if offered, and tap **Add**. Install it before entering plan data: iOS keeps Home Screen web-app storage separate from Safari and does not copy named saves automatically.
+
+Use **Refresh app** at the top of the web app to load the latest deployment. It saves applied changes before refreshing and keeps your named saves. On touch screens, tap a chart to brighten its colors; tap outside it to return to the muted palette. Scrolling cancels the touch highlight.
+
 Run `release/FIRE-Projector-Setup-<version>.exe`. Close an older running version before installing.
+
+The Windows app uses the same black interface and minimalist tiger artwork as the web app. Its executable, installer, uninstaller, and shortcuts use `assets/fire-tiger-minimal.ico`, a multi-size Windows icon derived from the shared artwork. Native Electron controls use the dark theme.
 
 All editable settings are in the input area at the top:
 

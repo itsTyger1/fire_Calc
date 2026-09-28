@@ -1,4 +1,6 @@
 import { defaultData } from '../domain/defaults';
+import { createInitialData } from '../domain/initial';
+import { resetPlannerInputs } from '../domain/reset';
 import { nominalReturnFromReal, realReturnFromNominal } from '../domain/calculations';
 import type { AppData } from '../domain/types';
 
@@ -59,16 +61,16 @@ const normalizeData = (data: AppData): AppData => {
 export const loadData = (): AppData => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return clone(defaultData);
+    if (!raw) return createInitialData();
     const parsed = JSON.parse(raw) as AppData;
-    return parsed.version === 1 ? migrateStarterScenarios(normalizeData(parsed)) : clone(defaultData);
+    return parsed.version === 1 ? migrateStarterScenarios(normalizeData(parsed)) : createInitialData();
   } catch {
-    return clone(defaultData);
+    return createInitialData();
   }
 };
 
 export const saveData = (data: AppData) => localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-export const resetData = () => clone(defaultData);
+export const resetData = (data: AppData = defaultData) => resetPlannerInputs(data);
 
 const isAppData = (value: unknown): value is AppData => {
   if (!value || typeof value !== 'object') return false;
@@ -117,4 +119,12 @@ export const saveNamedPlan = (name: string, data: AppData): SavedPlan => {
   };
   writeSavedPlans(existing ? plans.map((plan) => plan.id === existing.id ? saved : plan) : [saved, ...plans]);
   return saved;
+};
+
+export const deleteSavedPlan = (id: string): boolean => {
+  const plans = listSavedPlans();
+  const remaining = plans.filter((plan) => plan.id !== id);
+  if (remaining.length === plans.length) return false;
+  writeSavedPlans(remaining);
+  return true;
 };

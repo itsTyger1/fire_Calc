@@ -1,10 +1,15 @@
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, ComposedChart, Legend, Line, LineChart, Pie, PieChart, ReferenceDot, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import type { TooltipContentProps } from 'recharts';
 import type { AppData, Scenario, ScenarioResult } from '../domain/types';
-import { scenarioColors } from '../domain/defaults';
+import { chartColors, neonStyle, scenarioColor } from '../theme';
 import { allocationByClass, applyScenarioOverrides, bridgeMetrics, findFireCrossing, emergencyFundMetrics, nominalReturnFromReal, projectCore, scenarioBudgetMetrics } from '../domain/calculations';
 import { age, money, percent, Section } from './ui';
-const allocationColors = ['#37d39a', '#65a7ff', '#f4b860', '#ad7bff', '#ff718d', '#40c7d9', '#8191a1'];
+import { ChartSurface, useDockedChartTooltip } from './ChartInteraction';
+import { ColorCard } from './ColorCard';
+import { DraggableChartTooltip } from './DraggableChartTooltip';
+import { chartGlowDefinition } from './ChartGlow';
+const allocationColors = chartColors;
 
 export const monthStatus = (result: ScenarioResult) => {
   if (!result.firePoint) return { text: 'Not reached by max age', tone: 'negative' as const };
@@ -17,9 +22,8 @@ export const monthStatus = (result: ScenarioResult) => {
 
 interface ChartDatum { month: number; age: number; year: number; date: string; [key: string]: number | string }
 interface TimelineTooltipItem { dataKey?: string | number; value?: number | string; color?: string; payload?: ChartDatum }
-interface AccountTooltipItem { dataKey?: string | number; name?: string | number; value?: number | string; color?: string; stroke?: string }
 
-const accountTooltip = ({ active, payload, label }: { active?: boolean; payload?: ReadonlyArray<AccountTooltipItem>; label?: number | string }) => {
+const accountTooltip = ({ active, payload, label, highlightedKey }: Pick<TooltipContentProps, 'active' | 'payload' | 'label'> & { highlightedKey: string | null }) => {
   const items = payload?.filter((item) => item.value != null) ?? [];
   if (!active || !items.length) return null;
   const numericLabel = Number(label);
@@ -29,7 +33,7 @@ const accountTooltip = ({ active, payload, label }: { active?: boolean; payload?
     </div>
     <div className="account-tooltip-items">
       {items.map((item) => <div className="account-tooltip-item" key={String(item.dataKey ?? item.name)}>
-        <span className="account-tooltip-name"><i style={{ background: item.color ?? item.stroke ?? '#9fb4ba' }} />{item.name ?? item.dataKey}</span>
+        <span className="account-tooltip-name"><i className="series-dot" data-series-active={highlightedKey === String(item.dataKey) || undefined} style={{ background: item.color ?? item.stroke ?? 'var(--muted)', ...neonStyle(item.color ?? item.stroke ?? 'var(--muted)') }} />{String(item.name ?? item.dataKey)}</span>
         <strong>{money(Number(item.value ?? 0))}</strong>
       </div>)}
     </div>
@@ -37,8 +41,12 @@ const accountTooltip = ({ active, payload, label }: { active?: boolean; payload?
 };
 
 export function TimelineChart({ results, selected, onSelect }: { results: ScenarioResult[]; selected: string; onSelect: (id: string) => void }) {
+  const glowId = `timeline-glow-${useId().replace(/:/g, '')}`;
   const [axis, setAxis] = useState<'age' | 'year'>('age');
   const [range, setRange] = useState<'target' | '70' | 'max'>('70');
+  const dockedTooltip = useDockedChartTooltip();
+  const [highlightedScenario, setHighlightedScenario] = useState<string | null>(null);
+  const [tooltipPortal, setTooltipPortal] = useState<HTMLDivElement | null>(null);
   const visible = results.filter((result) => result.scenario.visible);
   const first = visible[0] ?? results[0];
   const maxMonth = range === 'target' ? Math.max(...visible.map((r) => Math.ceil((r.profile.retirementAge - r.profile.currentAge) * 12))) : range === '70' ? Math.max(...visible.map((r) => Math.ceil((70 - r.profile.currentAge) * 12))) : Math.max(...visible.map((r) => r.points.length - 1));
@@ -65,7 +73,7 @@ export function TimelineChart({ results, selected, onSelect }: { results: Scenar
     }
     return rows;
   }, [results, maxMonth]);
-  const tooltip = ({ active, payload, label }: { active?: boolean; payload?: ReadonlyArray<TimelineTooltipItem>; label?: number | string }) => {
+  const tooltip = ({ active, payload, label, coordinate }: { active?: boolean; payload?: ReadonlyArray<TimelineTooltipItem>; label?: number | string; coordinate?: { x: number; y: number } }) => {
     const portfolioPayload = payload?.filter((item) => visible.some((result) => result.scenario.id === String(item.dataKey))) ?? [];
     if (!active || !portfolioPayload.length) return null;
     const anchor = portfolioPayload[0]?.payload;
@@ -74,11 +82,10 @@ export function TimelineChart({ results, selected, onSelect }: { results: Scenar
     const dateLabel = anchorDate && !Number.isNaN(anchorDate.getTime())
       ? anchorDate.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
       : undefined;
-    return <div className="chart-tooltip">
-      <div className="tooltip-heading">
+    return <DraggableChartTooltip boundary={tooltipPortal} coordinate={coordinate} heading={<>
         <strong>{axis === 'age' ? `Age ${anchorAge.toFixed(1)}` : `Calendar year ${anchorDate?.getFullYear() ?? Math.floor(Number(label))}`}</strong>
         <span>{axis === 'age' ? dateLabel : `Age ${anchorAge.toFixed(1)}`}</span>
-      </div>
+      </>}>
       {portfolioPayload.map((item) => {
         const key = String(item.dataKey ?? '');
         const value = Number(item.value ?? 0);
@@ -89,7 +96,7 @@ export function TimelineChart({ results, selected, onSelect }: { results: Scenar
         const delta = point ? value - point.fireTarget : 0;
         const signedDelta = `${delta >= 0 ? '+' : '−'}${money(Math.abs(delta))}`;
         return <div className="tooltip-row" key={key}>
-          <div className="tooltip-scenario"><span style={{ background: item.color ?? result.scenario.color }} /><strong>{result.scenario.name}</strong></div>
+          <div className="tooltip-scenario"><span className="series-dot" data-series-active={highlightedScenario === key || undefined} style={{ background: item.color ?? scenarioColor(result.scenario.color), ...neonStyle(item.color ?? scenarioColor(result.scenario.color)) }} /><strong>{result.scenario.name}</strong></div>
           {point ? <dl className="tooltip-stats">
             <div><dt>Phase</dt><dd>{point.projectionPhase === 'retirement' ? 'Retirement' : 'Accumulation'}</dd></div>
             <div><dt>Portfolio</dt><dd>{money(value)}</dd></div>
@@ -101,37 +108,40 @@ export function TimelineChart({ results, selected, onSelect }: { results: Scenar
           </dl> : <small className="tooltip-unavailable">Value details unavailable</small>}
         </div>;
       })}
-    </div>;
+    </DraggableChartTooltip>;
   };
 
   if (!first || !visible.length) return <div className="empty-chart">Show at least one scenario to draw the timeline.</div>;
   return <>
     <p className="chart-phase-note muted">This projection uses every contribution phase in sequence, including emergency-fund saving before FIRE investing. The emergency phase ends when its cash target is reached.</p>
     <div className="chart-controls"><div className="segmented"><button className={axis === 'age' ? 'active' : ''} onClick={() => setAxis('age')}>Age</button><button className={axis === 'year' ? 'active' : ''} onClick={() => setAxis('year')}>Calendar year</button></div><select value={range} onChange={(e) => setRange(e.target.value as typeof range)}><option value="target">Through target age</option><option value="70">Through age 70</option><option value="max">Full projection</option></select></div>
-    <div className="main-chart"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={chartData} margin={{ top: 16, right: 18, bottom: 6, left: 4 }}>
-      <defs>{visible.map((r) => <filter key={r.scenario.id} id={`glow-${r.scenario.id}`}><feGaussianBlur stdDeviation="2" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>)}</defs>
-      <CartesianGrid vertical={false} stroke="#193642" strokeDasharray="4 5" />
-      <XAxis dataKey={axis} type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => axis === 'age' ? Number(v).toFixed(0) : String(Math.floor(v))} stroke="#78909a" tickLine={false} axisLine={false} />
-      <YAxis tickFormatter={(v) => money(v, true)} stroke="#78909a" tickLine={false} axisLine={false} width={64} />
-      <Tooltip content={tooltip as never} allowEscapeViewBox={{ x: false, y: false }} wrapperStyle={{ maxWidth: 'calc(100% - 12px)', maxHeight: 'calc(100% - 12px)' }} />
-      <Legend formatter={(id) => visible.find((r) => r.scenario.id === id)?.scenario.name ?? id} onClick={(item) => onSelect(String(item.dataKey))} />
-      {visible.map((result, index) => <Line key={`target-${result.scenario.id}`} dataKey={`${result.scenario.id}__target`} stroke={result.scenario.color} strokeWidth={1.4} strokeDasharray={`${3 + index} 6`} strokeOpacity={0.35} dot={false} activeDot={false} legendType="none" />)}
+    <ChartSurface className="main-chart" svgGlowId={glowId} onHighlightChange={setHighlightedScenario}><ResponsiveContainer width="100%" height="100%"><ComposedChart data={chartData} margin={{ top: 16, right: 18, bottom: 6, left: 4 }}>
+      {chartGlowDefinition(glowId)}
+      <CartesianGrid vertical={false} stroke="var(--line)" strokeDasharray="4 5" />
+      <XAxis dataKey={axis} type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => axis === 'age' ? Number(v).toFixed(0) : String(Math.floor(v))} stroke="var(--muted)" tickLine={false} axisLine={false} />
+      <YAxis tickFormatter={(v) => money(v, true)} stroke="var(--muted)" tickLine={false} axisLine={false} width={64} />
+      <Tooltip content={tooltip as never} portal={tooltipPortal} active={dockedTooltip ? highlightedScenario !== null : undefined} isAnimationActive={false} cursor={{ stroke: 'var(--line-strong)', strokeDasharray: '3 5' }} wrapperStyle={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }} />
+      <Legend formatter={(id) => {
+        const result = visible.find((r) => r.scenario.id === id);
+        return <span className="series-label" data-series-active={highlightedScenario === String(id) || undefined} style={{ color: result ? scenarioColor(result.scenario.color) : undefined, ...neonStyle(result ? scenarioColor(result.scenario.color) : chartColors[0]) }}>{result?.scenario.name ?? id}</span>;
+      }} onClick={(item) => onSelect(String(item.dataKey))} />
+      {visible.map((result, index) => <Line key={`target-${result.scenario.id}`} dataKey={`${result.scenario.id}__target`} data-chart-key={result.scenario.id} stroke={scenarioColor(result.scenario.color)} style={neonStyle(scenarioColor(result.scenario.color))} strokeWidth={1.4} strokeDasharray={`${3 + index} 6`} strokeOpacity={0.35} dot={false} activeDot={false} legendType="none" />)}
       {visible.map((result) => {
         const retirementPoint = result.points.find((point) => point.projectionPhase === 'retirement');
         if (!retirementPoint) return null;
         const retirementDate = new Date(retirementPoint.date);
         const x = axis === 'age' ? retirementPoint.age : retirementDate.getFullYear() + retirementDate.getMonth() / 12;
-        return <ReferenceLine key={`retirement-${result.scenario.id}`} x={x} stroke={result.scenario.color} strokeDasharray="7 5" strokeOpacity={0.6} />;
+        return <ReferenceLine key={`retirement-${result.scenario.id}`} x={x} stroke={scenarioColor(result.scenario.color)} style={neonStyle(scenarioColor(result.scenario.color))} strokeDasharray="7 5" strokeOpacity={0.6} />;
       })}
-      {visible.map((result) => <Line key={result.scenario.id} dataKey={result.scenario.id} type="monotone" stroke={result.scenario.color} strokeWidth={selected === result.scenario.id ? 4 : 2.4} dot={false} activeDot={{ r: 5 }} opacity={selected && selected !== result.scenario.id ? .42 : 1} style={selected === result.scenario.id ? { filter: `url(#glow-${result.scenario.id})` } : undefined} />)}
-      {visible.map((result) => result.firePoint && result.firePoint.month <= maxMonth ? <ReferenceDot key={`dot-${result.scenario.id}`} x={axis === 'age' ? result.firePoint.age : new Date(result.firePoint.date).getFullYear() + new Date(result.firePoint.date).getMonth() / 12} y={result.firePoint.firePortfolio} r={5} fill={result.scenario.color} stroke="#071b24" strokeWidth={2} /> : null)}
-    </ComposedChart></ResponsiveContainer></div>
+      {visible.map((result) => <Line key={result.scenario.id} dataKey={result.scenario.id} data-chart-key={result.scenario.id} type="monotone" stroke={scenarioColor(result.scenario.color)} style={neonStyle(scenarioColor(result.scenario.color))} strokeWidth={selected === result.scenario.id ? 3 : 2} dot={false} activeDot={false} isAnimationActive={false} opacity={selected && selected !== result.scenario.id ? .42 : 1} />)}
+      {visible.map((result) => result.firePoint && result.firePoint.month <= maxMonth ? <ReferenceDot key={`dot-${result.scenario.id}`} x={axis === 'age' ? result.firePoint.age : new Date(result.firePoint.date).getFullYear() + new Date(result.firePoint.date).getMonth() / 12} y={result.firePoint.firePortfolio} r={5} fill={scenarioColor(result.scenario.color)} style={neonStyle(scenarioColor(result.scenario.color))} stroke="var(--surface)" strokeWidth={2} /> : null)}
+    </ComposedChart></ResponsiveContainer><div className="timeline-floating-layer" ref={setTooltipPortal} /></ChartSurface>
     <div className="chart-key"><span><i className="solid-line" /> Portfolio balance</span><span><i className="dash-line" /> FIRE target</span><span><i className="retirement-line" /> Retirement begins</span><span><i className="dot-key" /> First target crossing</span></div>
   </>;
 }
 
 export function SummaryTable({ results, selected, onSelect }: { results: ScenarioResult[]; selected: string; onSelect: (id: string) => void }) {
-  return <div className="table-wrap"><table><thead><tr><th>Scenario</th><th>FIRE goal</th><th>FIRE age / date</th><th>At target age</th><th>Monthly investing</th><th>Surplus / shortfall</th><th>Status</th></tr></thead><tbody>{results.map((result) => { const delta = result.targetPoint.firePortfolio - result.targetPoint.fireTarget; const status = monthStatus(result); return <tr key={result.scenario.id} className={selected === result.scenario.id ? 'selected' : ''} onClick={() => onSelect(result.scenario.id)}><td><i style={{ background: result.scenario.color }} /><strong>{result.scenario.name}</strong></td><td>{money(result.fireNumber, true)}</td><td><strong>{age(result.firePoint?.age)}</strong><small>{result.firePoint ? new Date(result.firePoint.date).toLocaleDateString(undefined, { month: 'short', year: 'numeric' }) : `By age ${result.profile.maxAge}`}</small></td><td>{money(result.targetPoint.firePortfolio, true)}</td><td>{money(result.plannedPersonalMonthly + result.plannedEmployerMonthly)}/mo<small>{money(result.plannedEmployerMonthly)} employer</small></td><td className={delta >= 0 ? 'positive-text' : 'negative-text'}>{delta >= 0 ? '+' : ''}{money(delta, true)}</td><td><span className={`status ${status.tone}`}>{status.text}</span></td></tr>; })}</tbody></table></div>;
+  return <div className="table-wrap"><table><thead><tr><th>Scenario</th><th>FIRE goal</th><th>FIRE age / date</th><th>At target age</th><th>Monthly investing</th><th>Surplus / shortfall</th><th>Status</th></tr></thead><tbody>{results.map((result) => { const delta = result.targetPoint.firePortfolio - result.targetPoint.fireTarget; const status = monthStatus(result); return <tr key={result.scenario.id} className={selected === result.scenario.id ? 'selected' : ''} onClick={() => onSelect(result.scenario.id)}><td><i className="color-swatch" style={{ background: scenarioColor(result.scenario.color), ...neonStyle(scenarioColor(result.scenario.color)) }} /><strong>{result.scenario.name}</strong></td><td>{money(result.fireNumber, true)}</td><td><strong>{age(result.firePoint?.age)}</strong><small>{result.firePoint ? new Date(result.firePoint.date).toLocaleDateString(undefined, { month: 'short', year: 'numeric' }) : `By age ${result.profile.maxAge}`}</small></td><td>{money(result.targetPoint.firePortfolio, true)}</td><td>{money(result.plannedPersonalMonthly + result.plannedEmployerMonthly)}/mo<small>{money(result.plannedEmployerMonthly)} employer</small></td><td className={delta >= 0 ? 'positive-text' : 'negative-text'}>{delta >= 0 ? '+' : ''}{money(delta, true)}</td><td><span className={`status ${status.tone}`}>{status.text}</span></td></tr>; })}</tbody></table></div>;
 }
 
 export function RetirementDrawdown({ result }: { result: ScenarioResult }) {
@@ -168,25 +178,57 @@ export function RetirementDrawdown({ result }: { result: ScenarioResult }) {
 }
 
 export function Analytics({ result, data }: { result: ScenarioResult; data: AppData }) {
+  const glowId = `analytics-glow-${useId().replace(/:/g, '')}`;
+  const [compositionPortal, setCompositionPortal] = useState<HTMLDivElement | null>(null);
+  const [allocationPortal, setAllocationPortal] = useState<HTMLDivElement | null>(null);
+  const [highlightedComposition, setHighlightedComposition] = useState<string | null>(null);
+  const [highlightedAccount, setHighlightedAccount] = useState<string | null>(null);
+  const dockedTooltip = useDockedChartTooltip();
   const focus = result.firePoint ?? result.targetPoint;
   const composition = [
-    { name: 'Starting principal', value: focus.startingPrincipal, color: '#65a7ff' },
-    { name: 'Personal contributions', value: focus.personalContributions, color: '#37d39a' },
-    { name: 'Employer contributions', value: focus.employerContributions, color: '#f4b860' },
-    { name: 'Investment growth', value: Math.max(0, focus.investmentGrowth), color: '#ad7bff' },
+    { name: 'Starting principal', value: focus.startingPrincipal, color: '#98adb8' },
+    { name: 'Personal contributions', value: focus.personalContributions, color: '#d3a17e' },
+    { name: 'Employer contributions', value: focus.employerContributions, color: '#a6b69f' },
+    { name: 'Investment growth', value: Math.max(0, focus.investmentGrowth), color: '#b5a1bb' },
   ];
   const accountData = result.points.filter((_, index) => index % 12 === 0 && index <= Math.min(result.points.length - 1, Math.ceil((65 - result.profile.currentAge) * 12))).map((p) => ({ age: p.age, ...p.balances }));
   const allocations = allocationByClass(data.accounts);
   return <div className="analytics-grid">
     <Section title="What builds the portfolio" eyebrow={result.firePoint ? 'At FIRE date' : 'At target age'}>
-      <div className="composition"><div className="donut"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={composition} dataKey="value" innerRadius={48} outerRadius={76} paddingAngle={3}>{composition.map((item) => <Cell key={item.name} fill={item.color} />)}</Pie><Tooltip formatter={(v) => money(Number(v))} /></PieChart></ResponsiveContainer><div><strong>{money(focus.firePortfolio, true)}</strong><small>Total</small></div></div><div className="legend-list">{composition.map((item) => <div key={item.name}><i style={{ background: item.color }} /><span>{item.name}</span><b>{money(item.value, true)}</b><small>{percent(item.value / Math.max(1, focus.firePortfolio))}</small></div>)}</div></div>
+      <div className="composition"><ChartSurface className="donut" svgGlowId={`${glowId}-pie`} onHighlightChange={setHighlightedComposition}><ResponsiveContainer width="100%" height="100%"><PieChart>{chartGlowDefinition(`${glowId}-pie`)}<Pie data={composition} dataKey="value" innerRadius={48} outerRadius={76} paddingAngle={3} stroke="var(--surface)">{composition.map((item) => <Cell key={item.name} data-chart-key={item.name} fill={item.color} style={neonStyle(item.color)} />)}</Pie><Tooltip
+        portal={compositionPortal}
+        active={dockedTooltip ? true : undefined}
+        isAnimationActive={false}
+        wrapperStyle={{ width: '100%', height: '100%', position: 'relative' }}
+        content={({ active, payload }) => {
+          if (!active || !payload?.length) return null;
+          const item = composition.find((part) => part.name === String(payload[0].name));
+          const color = item?.color ?? String(payload[0].color);
+          return <div className="composition-tooltip"><i className="series-dot" data-series-active={highlightedComposition === item?.name || undefined} style={{ background: color, ...neonStyle(color) }} /><span>{payload[0].name}</span><strong>{money(Number(payload[0].value))}</strong></div>;
+        }}
+      /></PieChart></ResponsiveContainer><div><strong>{money(focus.firePortfolio, true)}</strong><small>Total</small></div></ChartSurface><div className="legend-list">{composition.map((item) => <div key={item.name}><i className="color-swatch series-dot" data-series-active={highlightedComposition === item.name || undefined} style={{ background: item.color, ...neonStyle(item.color) }} /><span>{item.name}</span><b>{money(item.value, true)}</b><small>{percent(item.value / Math.max(1, focus.firePortfolio))}</small></div>)}</div></div>
+      <div className="composition-readout" ref={setCompositionPortal}><p>Hover or tap a segment to see its value here.</p></div>
     </Section>
-    <Section title="All-account allocation" eyebrow="Current holdings">
-      <div className="allocation-chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={allocations} layout="vertical" margin={{ left: 16, right: 20 }}><XAxis type="number" hide /><YAxis type="category" dataKey="name" width={112} tick={{ fill: '#a9bac0', fontSize: 11 }} axisLine={false} tickLine={false} /><Tooltip formatter={(v) => money(Number(v))} /><Bar dataKey="value" radius={[0, 5, 5, 0]}>{allocations.map((_, i) => <Cell key={i} fill={allocationColors[i % allocationColors.length]} />)}</Bar></BarChart></ResponsiveContainer></div>
+    <Section title="All-account allocation" eyebrow="Current holdings" className="allocation-panel">
+      <ChartSurface className="allocation-chart" svgGlowId={`${glowId}-bars`}><ResponsiveContainer width="100%" height="100%"><BarChart data={allocations} layout="vertical" margin={{ left: 16, right: 20 }}>{chartGlowDefinition(`${glowId}-bars`)}<XAxis type="number" hide /><YAxis type="category" dataKey="name" width={112} tick={{ fill: 'var(--text-secondary)', fontSize: 11 }} axisLine={false} tickLine={false} /><Tooltip cursor={false}
+        portal={allocationPortal}
+        active={dockedTooltip ? true : undefined}
+        isAnimationActive={false}
+        wrapperStyle={{ width: '100%', height: '100%', position: 'relative' }}
+        content={({ active, payload }) => {
+          if (!active || !payload?.length) return null;
+          const item = payload[0];
+          const name = String(item.payload?.name ?? 'Allocation');
+          const index = allocations.findIndex((allocation) => allocation.name === name);
+          const color = allocationColors[Math.max(0, index) % allocationColors.length];
+          return <div className="composition-tooltip"><i className="color-swatch" style={{ background: color, ...neonStyle(color) }} /><span>{name}</span><strong>{money(Number(item.value))}</strong></div>;
+        }}
+      /><Bar dataKey="value" radius={[0, 5, 5, 0]} activeBar={false}>{allocations.map((_, i) => <Cell key={i} fill={allocationColors[i % allocationColors.length]} style={neonStyle(allocationColors[i % allocationColors.length])} />)}</Bar></BarChart></ResponsiveContainer></ChartSurface>
+      <div className="composition-readout allocation-readout" ref={setAllocationPortal}><p>Hover or tap a bar to see its value here.</p></div>
     </Section>
     <Section title="Account balances over time" eyebrow="Selected scenario · independent balances" className="wide-panel">
       <div className="account-chart-note"><span>Each line is one account—not a cumulative stack.</span><span>Contributions before retirement · withdrawals after</span></div>
-      <div className="account-chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={accountData} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}><CartesianGrid vertical={false} stroke="#193642" /><XAxis dataKey="age" tickFormatter={(v) => Number(v).toFixed(0)} stroke="#78909a" axisLine={false} tickLine={false} /><YAxis tickFormatter={(v) => money(v, true)} stroke="#78909a" width={58} axisLine={false} tickLine={false} /><Tooltip content={accountTooltip as never} allowEscapeViewBox={{ x: false, y: false }} />{result.accounts.map((account, i) => <Line key={account.id} type="monotone" dataKey={account.id} name={account.name} stroke={scenarioColors[i % scenarioColors.length]} strokeWidth={2.2} dot={false} activeDot={{ r: 4 }} />)}</LineChart></ResponsiveContainer></div>
+      <ChartSurface className="account-chart" svgGlowId={`${glowId}-accounts`} onHighlightChange={setHighlightedAccount}><ResponsiveContainer width="100%" height="100%"><LineChart data={accountData} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}>{chartGlowDefinition(`${glowId}-accounts`)}<CartesianGrid vertical={false} stroke="var(--line)" /><XAxis dataKey="age" tickFormatter={(v) => Number(v).toFixed(0)} stroke="var(--muted)" axisLine={false} tickLine={false} /><YAxis tickFormatter={(v) => money(v, true)} stroke="var(--muted)" width={58} axisLine={false} tickLine={false} /><Tooltip content={(props) => accountTooltip({ ...props, highlightedKey: highlightedAccount })} active={dockedTooltip ? highlightedAccount !== null : undefined} isAnimationActive={false} allowEscapeViewBox={{ x: false, y: false }} />{result.accounts.map((account, i) => <Line key={account.id} type="monotone" dataKey={account.id} data-chart-key={account.id} name={account.name} stroke={chartColors[i % chartColors.length]} style={neonStyle(chartColors[i % chartColors.length])} strokeWidth={2.2} dot={false} activeDot={false} isAnimationActive={false} />)}</LineChart></ResponsiveContainer></ChartSurface>
     </Section>
   </div>;
 }
@@ -199,8 +241,8 @@ export function BridgeAndEmergency({ result, data }: { result: ScenarioResult; d
   const cashSavings = cashAccount ? (phase?.contributions[cashAccount.id]?.personal ?? cashAccount.monthlyContribution) : 0;
   const emergency = emergencyFundMetrics(cashAccount?.balance ?? 0, result.profile.emergencyTarget, cashSavings, data.profile.normalMonthlySpending, data.profile.jobLossMonthlySpending);
   return <div className="bridge-grid">
-    <Section title="Early retirement bridge" eyebrow="Access before 59½"><p className="muted">{usesTargetAge ? `FIRE is not reached in this projection. This estimate uses your planned retirement age ${startAge.toFixed(1)}; it does not mean retirement is funded.` : `If you retire at projected FIRE age ${startAge.toFixed(1)}, the bridge runs from that age to 59½. The main chart still starts withdrawals at your chosen retirement age.`}</p><div className="bridge-callout"><div className={`bridge-ring ${accessible >= bridgeNeed ? 'good' : 'warn'}`}><strong>{percent(bridgeNeed === 0 ? 1 : Math.min(1, accessible / bridgeNeed), 0)}</strong><small>funded</small></div><div><h3>{bridgeYears === 0 ? 'No bridge needed before 59½' : accessible >= bridgeNeed ? 'Your estimated bridge is covered' : `${money(bridgeNeed - accessible)} bridge gap`}</h3><p>{money(accessible)} accessible against an estimated {money(bridgeNeed)} needed for {bridgeYears.toFixed(1)} years.</p></div></div><div className="mini-metrics"><div><span>{usesTargetAge ? 'Accessible at target age' : 'Accessible at FIRE'}</span><strong>{money(accessible)}</strong></div><div><span>Annual spending</span><strong>{money(result.profile.annualSpending)}</strong></div><div><span>Bridge years</span><strong>{bridgeYears.toFixed(1)}</strong></div></div><p className="fine-print">How it’s calculated: immediate-access account balances, plus available Roth IRA basis, capped at included Roth IRA balances. Regular contributions come first, followed by conversion principal in tax-year order (taxable before nontaxable). Taxable conversions become available after five tax years or at age 59½. Only accounts included in net worth count here. 401(k) balances remain restricted. Accessibility settings control other accounts; Roth IRA access always uses tracked basis. Spending is summed through 59½, with inflation in future-dollar mode; scheduled conversions and funded conversion taxes affect balances. This is an access snapshot at the start of the bridge, not a simulation of annual ladder withdrawals; later conversion unlocks and bridge investment returns are not included in the coverage percentage.</p></Section>
-    <Section title="Emergency fund" eyebrow="Cash runway"><p className="muted">Cash target: {money(result.profile.emergencyTarget)} · Normal spending: {money(data.profile.normalMonthlySpending)}/mo · Job-loss spending: {money(data.profile.jobLossMonthlySpending)}/mo</p><div className="mini-metrics"><div><span>Normal runway</span><strong>{emergency.normalRunway.toFixed(1)} mo</strong></div><div><span>Job-loss runway</span><strong>{emergency.jobLossRunway.toFixed(1)} mo</strong></div><div><span>Target ETA</span><strong>{Number.isFinite(emergency.monthsToTarget) ? `${emergency.monthsToTarget} mo` : 'No savings'}</strong></div></div><div className="progress"><span style={{ width: `${Math.min(100, (cashAccount?.balance ?? 0) / Math.max(1, result.profile.emergencyTarget) * 100)}%` }} /></div><small className="muted">{money(emergency.remaining)} remaining · {money(cashSavings)}/mo current cash savings</small></Section>
+    <Section title="Early retirement bridge" eyebrow="Access before 59½"><p className="muted">{usesTargetAge ? `FIRE is not reached in this projection. This estimate uses your planned retirement age ${startAge.toFixed(1)}; it does not mean retirement is funded.` : `If you retire at projected FIRE age ${startAge.toFixed(1)}, the bridge runs from that age to 59½. The main chart still starts withdrawals at your chosen retirement age.`}</p><div className="bridge-callout"><ChartSurface className={`bridge-ring ${accessible >= bridgeNeed ? 'good' : 'warn'}`} style={neonStyle(accessible >= bridgeNeed ? chartColors[1] : chartColors[6])}><strong>{percent(bridgeNeed === 0 ? 1 : Math.min(1, accessible / bridgeNeed), 0)}</strong><small>funded</small></ChartSurface><div><h3>{bridgeYears === 0 ? 'No bridge needed before 59½' : accessible >= bridgeNeed ? 'Your estimated bridge is covered' : `${money(bridgeNeed - accessible)} bridge gap`}</h3><p>{money(accessible)} accessible against an estimated {money(bridgeNeed)} needed for {bridgeYears.toFixed(1)} years.</p></div></div><div className="mini-metrics"><div><span>{usesTargetAge ? 'Accessible at target age' : 'Accessible at FIRE'}</span><strong>{money(accessible)}</strong></div><div><span>Annual spending</span><strong>{money(result.profile.annualSpending)}</strong></div><div><span>Bridge years</span><strong>{bridgeYears.toFixed(1)}</strong></div></div><p className="fine-print">How it’s calculated: immediate-access account balances, plus available Roth IRA basis, capped at included Roth IRA balances. Regular contributions come first, followed by conversion principal in tax-year order (taxable before nontaxable). Taxable conversions become available after five tax years or at age 59½. Only accounts included in net worth count here. 401(k) balances remain restricted. Accessibility settings control other accounts; Roth IRA access always uses tracked basis. Spending is summed through 59½, with inflation in future-dollar mode; scheduled conversions and funded conversion taxes affect balances. This is an access snapshot at the start of the bridge, not a simulation of annual ladder withdrawals; later conversion unlocks and bridge investment returns are not included in the coverage percentage.</p></Section>
+    <Section title="Emergency fund" eyebrow="Cash runway"><p className="muted">Cash target: {money(result.profile.emergencyTarget)} · Normal spending: {money(data.profile.normalMonthlySpending)}/mo · Job-loss spending: {money(data.profile.jobLossMonthlySpending)}/mo</p><div className="mini-metrics"><div><span>Normal runway</span><strong>{emergency.normalRunway.toFixed(1)} mo</strong></div><div><span>Job-loss runway</span><strong>{emergency.jobLossRunway.toFixed(1)} mo</strong></div><div><span>Target ETA</span><strong>{Number.isFinite(emergency.monthsToTarget) ? `${emergency.monthsToTarget} mo` : 'No savings'}</strong></div></div><ChartSurface className="progress" style={neonStyle(chartColors[1])}><span style={{ width: `${Math.min(100, (cashAccount?.balance ?? 0) / Math.max(1, result.profile.emergencyTarget) * 100)}%` }} /></ChartSurface><small className="muted">{money(emergency.remaining)} remaining · {money(cashSavings)}/mo current cash savings</small></Section>
   </div>;
 }
 
@@ -214,10 +256,10 @@ export function Sensitivity({ data, selectedScenario }: { data: AppData; selecte
   const contributions = [0, 250, 500, 1000].map((extra) => ({ label: extra === 0 ? 'Current' : `+${money(extra)}/mo`, age: fireAgeFor({ ...base, extraMonthlyContribution: extra }) }));
   const spending = [-.2, -.1, 0, .1, .2].map((delta) => ({ label: money(profile.annualSpending * (1 + delta)), age: fireAgeFor({ ...base, profile: { ...profile, annualSpending: profile.annualSpending * (1 + delta) } }) }));
   const rates = [.03, .0325, .035, .0375, .04].map((value) => ({ label: percent(value, 2), age: fireAgeFor({ ...base, profile: { ...profile, withdrawalRate: value } }) }));
-  const group = (title: string, items: { label: string; age?: number }[]) => <div className="sensitivity-group"><strong>{title}</strong><div>{items.map((item) => {
+  const group = (title: string, items: { label: string; age?: number }[]) => <ColorCard className="sensitivity-group"><strong>{title}</strong><div>{items.map((item) => {
     const difference = item.age == null || baselineAge == null ? undefined : item.age - baselineAge;
     return <span key={item.label}><small>{item.label}</small><b>{item.age == null ? 'Not reached' : `Age ${item.age.toFixed(1)}`}</b><small>{difference == null ? `By age ${profile.maxAge}` : Math.abs(difference) < 1 / 12 ? 'Same age' : `${Math.abs(difference).toFixed(1)} years ${difference < 0 ? 'earlier' : 'later'}`}</small></span>;
-  })}</div></div>;
+  })}</div></ColorCard>;
   return <Section title="Sensitivity explorer" eyebrow="What could move your FIRE date?">
     <p className="muted">For <strong>{selectedScenario.name}</strong>, the current assumptions {baselineAge == null ? `do not reach FIRE by age ${profile.maxAge}` : `reach FIRE at age ${baselineAge.toFixed(1)}`}. Each row changes one assumption and compares with that baseline. These previews do not change your plan.</p>
     <p className="muted">This explorer assumes you keep contributing until FIRE, even beyond your chosen retirement age. The main chart includes retirement withdrawals, so its result can differ. These are fixed-return estimates, not probabilities of success. Custom account returns stay unchanged.</p>

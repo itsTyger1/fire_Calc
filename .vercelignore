@@ -1,0 +1,16 @@
+node_modules/
+dist/
+release/
+release-next/
+artifacts/
+build/
+.git/
+.vercel/
+assets/
+electron/
+scripts/
+tests/
+README.md
+PATCH_NOTES.md
+IPHONE_IMPLEMENTATION_PLAN.md
+PUSHING.md

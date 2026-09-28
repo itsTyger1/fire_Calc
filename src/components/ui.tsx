@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ChevronDown, Info } from 'lucide-react';
+import { ColorCard } from './ColorCard';
 
 export const money = (value: number, compact = false) => {
   if (!Number.isFinite(value)) return 'Not reachable';
@@ -100,11 +101,11 @@ export function Toggle({ label, checked, onChange, detail }: { label: string; ch
 }
 
 export function Section({ title, eyebrow, action, children, className = '' }: { title: string; eyebrow?: string; action?: ReactNode; children: ReactNode; className?: string }) {
-  return <section className={`panel ${className}`}><header className="panel-head"><div>{eyebrow && <span className="eyebrow">{eyebrow}</span>}<h2>{title}</h2></div>{action}</header>{children}</section>;
+  return <ColorCard as="section" className={`panel ${className}`}><header className="panel-head"><div>{eyebrow && <span className="eyebrow">{eyebrow}</span>}<h2>{title}</h2></div>{action}</header>{children}</ColorCard>;
 }
 
 export function Metric({ label, value, sub, tone = 'default', info }: { label: string; value: ReactNode; sub?: ReactNode; tone?: 'default' | 'positive' | 'negative' | 'accent'; info?: string }) {
-  return <div className={`metric tone-${tone}`}><span className="metric-label">{label}{info && <span className="hint" title={info}><Info size={13} /></span>}</span><strong>{value}</strong>{sub && <small>{sub}</small>}</div>;
+  return <ColorCard className={`metric tone-${tone}`}><span className="metric-label">{label}{info && <span className="hint" title={info}><Info size={13} /></span>}</span><strong>{value}</strong>{sub && <small>{sub}</small>}</ColorCard>;
 }
 
 export function Empty({ children }: { children: ReactNode }) { return <div className="empty">{children}</div>; }

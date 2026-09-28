@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const populatedFixture = require('./planner-fixture.cjs');
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'fire-scenario-edit-'));
 app.setPath('userData', profile);
 app.disableHardwareAcceleration();
@@ -14,6 +15,11 @@ app.whenReady().then(async () => {
   let code = 0;
   try {
     await win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
+    await settle();
+    await evaluate((fixture) => localStorage.setItem('fire-projector-v1', JSON.stringify(fixture)), populatedFixture);
+    const fixtureLoaded = new Promise((resolve) => win.webContents.once('did-finish-load', resolve));
+    win.reload();
+    await fixtureLoaded;
     await settle();
     const original = await evaluate(() => document.querySelector('[role="combobox"]').value);
     const position = await evaluate(() => {

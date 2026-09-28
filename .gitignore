@@ -6,3 +6,4 @@ release-next/
 *.log
 *.tsbuildinfo
 artifacts/
+.vercel

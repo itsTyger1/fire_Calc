@@ -8,6 +8,7 @@ import { copyMonthlyPhaseValues, resetMonthlyPhaseValues } from '../domain/budge
 import { AccountsEditor, BudgetEditor, ProfileEditor } from './Editors';
 import { RothEditor } from './RothEditor';
 import { CommittedNumberInput, Field, money, SelectField, Toggle } from './ui';
+import { ColorCard } from './ColorCard';
 
 type Setter = Dispatch<SetStateAction<AppData>>;
 type Tab = 'plan' | 'money' | 'accounts';
@@ -18,11 +19,12 @@ const tabs: { id: Tab; title: string; description: string }[] = [
   { id: 'accounts', title: 'Accounts', description: 'Balances & account details' },
 ];
 
-export function InputHub({ data, setData, scenario, setSelected, phaseId, setPhaseId }: {
+export function InputHub({ data, setData, scenario, setSelected, phaseId, setPhaseId, initialTab = 'money' }: {
   data: AppData; setData: Setter; scenario: Scenario; setSelected: (id: string) => void;
   phaseId?: string; setPhaseId: (id: string) => void;
+  initialTab?: Tab;
 }) {
-  const [tab, setTab] = useState<Tab>('money');
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [scenarioMenuOpen, setScenarioMenuOpen] = useState(false);
   const [scenarioDraftName, setScenarioDraftName] = useState(scenario.name);
   const scenarioPickerRef = useRef<HTMLDivElement>(null);
@@ -152,7 +154,7 @@ export function InputHub({ data, setData, scenario, setSelected, phaseId, setPha
     setData((old) => removeAccountFromData(old, accountId));
   };
 
-  return <section id="inputs" className="input-hub" aria-labelledby="input-heading">
+  return <ColorCard as="section" id="inputs" className="input-hub" aria-labelledby="input-heading">
     {scenarioAction && <dialog ref={scenarioDialogRef} className="update-modal scenario-confirmation" aria-labelledby="scenario-confirmation-title" onCancel={(event) => { event.preventDefault(); closeScenarioDialog(); }}>
       <h2 id="scenario-confirmation-title">{scenarioAction.kind === 'delete' ? 'Delete scenario?' : 'Reset scenario?'}</h2>
       <p>{scenarioAction.kind === 'delete' ? <>Delete “{scenarioAction.name}” from this plan?</> : <>Reset all overrides for “{scenarioAction.name}”?</>}</p>
@@ -217,7 +219,7 @@ export function InputHub({ data, setData, scenario, setSelected, phaseId, setPha
       </>}
       {tab === 'accounts' && <><div className="input-section-heading"><h2>Account balances & details</h2><p>Shared across scenarios. Monthly contributions are entered in Monthly money.</p></div><AccountsEditor data={data} setData={setData} /><RothEditor data={data} setData={setData} scenario={scenario} /></>}
     </div>
-  </section>;
+  </ColorCard>;
 }
 
 function ContributionsEditor({ data, setData, scenario, phaseId, onAddAccount, onRemoveAccount, onRenameAccount }: {

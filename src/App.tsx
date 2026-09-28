@@ -1,9 +1,9 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, CircleDollarSign, Flame, FolderOpen, Gauge, Landmark, RefreshCcw, Save } from 'lucide-react';
+import { Check, CircleDollarSign, Flame, FolderOpen, Gauge, Landmark, RefreshCcw, Save, Trash2 } from 'lucide-react';
 import type { AppData } from './domain/types';
-import { defaultData } from './domain/defaults';
+import { createInitialData } from './domain/initial';
 import { projectScenario, scenarioBudgetMetrics } from './domain/calculations';
-import { listSavedPlans, loadData, resetData, saveData, saveNamedPlan, type SavedPlan } from './lib/persistence';
+import { deleteSavedPlan as deleteNamedPlan, listSavedPlans, loadData, resetData, saveData, saveNamedPlan, type SavedPlan } from './lib/persistence';
 import { InputHub } from './components/InputHub';
 import { BudgetSummary } from './components/BudgetSummary';
 import { Analytics, BridgeAndEmergency, monthStatus, RetirementDrawdown, Sensitivity, SummaryTable, TimelineChart } from './components/Results';
@@ -15,6 +15,7 @@ declare global { interface Window {
   firePlans?: {
     save: (name: string, data: AppData) => Promise<{ canceled: true } | { canceled: false; name: string; filePath: string }>;
     list: () => Promise<SavedPlan[]>;
+    delete: (id: string) => Promise<boolean>;
   };
 } }
 const clone = <T,>(value: T): T => structuredClone(value);
@@ -29,10 +30,17 @@ export default function App() {
   const [updatePromptOpen, setUpdatePromptOpen] = useState(false);
   const [appVersion, setAppVersion] = useState(fallbackAppVersion);
   const [requestedPhaseId, setPhaseId] = useState<string>();
+  const [inputRevision, setInputRevision] = useState(0);
+  useEffect(() => {
+    if (inputRevision === 0) return;
+    const frame = window.requestAnimationFrame(() => document.getElementById('inputs')?.scrollIntoView({ block: 'start', behavior: 'instant' }));
+    return () => window.cancelAnimationFrame(frame);
+  }, [inputRevision]);
   const [savedPlans, setSavedPlans] = useState<SavedPlan[]>(() => window.firePlans ? [] : listSavedPlans());
   const [loadMenuOpen, setLoadMenuOpen] = useState(false);
   const loadMenuRef = useRef<HTMLDivElement>(null);
   const [savingPlan, setSavingPlan] = useState(false);
+  const [deletingSavedPlanId, setDeletingSavedPlanId] = useState<string | null>(null);
   const [saveConfirmation, setSaveConfirmation] = useState<{ name: string; location: string; warning?: string } | null>(null);
   const saveDialogRef = useRef<HTMLDialogElement>(null);
   useEffect(() => { if (saveConfirmation) saveDialogRef.current?.showModal(); }, [saveConfirmation]);
@@ -78,6 +86,24 @@ export default function App() {
     }
   };
 
+  const handleDeleteSavedPlan = async (saved: SavedPlan) => {
+    if (deletingSavedPlanId) return;
+    if (!window.confirm(`Delete the saved plan “${saved.name}”? This cannot be undone.`)) return;
+    setDeletingSavedPlanId(saved.id);
+    try {
+      const deleted = window.firePlans
+        ? await window.firePlans.delete(saved.id)
+        : deleteNamedPlan(saved.id);
+      const latest = window.firePlans ? await window.firePlans.list() : listSavedPlans();
+      setSavedPlans(latest);
+      setToast(deleted ? `Deleted “${saved.name}”` : 'Saved plan was not found');
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : 'Could not delete this saved plan');
+    } finally {
+      setDeletingSavedPlanId(null);
+    }
+  };
+
   const handleSave = async () => {
     if (savingPlan) return;
     setSavingPlan(true);
@@ -115,8 +141,29 @@ export default function App() {
     setLoadMenuOpen(false);
     setToast(`Loaded “${saved.name}”`);
   };
-  const handleReset = () => { if (!window.confirm('Are you sure you want to reset the entire planner to its seeded defaults?')) return; const next = resetData(); setData(next); setSelected(next.scenarios[0].id); setToast('Planner reset'); };
-  const handleRefresh = () => window.location.reload();
+  const handleReset = () => {
+    if (!window.confirm('Reset inputs to defaults? Current and retirement ages and amounts will be 0; maximum projection age 100, nominal return 10%, inflation 3.2%, and withdrawal rate 4%. Your named saves will be kept.')) return;
+    const next = resetData(data);
+    saveData(next);
+    setData(next);
+    setInputRevision((revision) => revision + 1);
+    setToast('Inputs reset to defaults');
+  };
+  const handleRefresh = () => {
+    try {
+      saveData(data);
+    } catch {
+      setToast('Could not save your current plan. Refresh canceled.');
+      return;
+    }
+    if (window.fireUpdater) {
+      window.location.reload();
+    } else {
+      const url = new URL(window.location.href);
+      url.searchParams.set('_refresh', Date.now().toString(36));
+      window.location.replace(url.href);
+    }
+  };
   const handleUpdate = async () => {
     setUpdate(null);
     setUpdatePromptOpen(false);
@@ -146,7 +193,7 @@ export default function App() {
     } catch (error) { setToast(error instanceof Error ? error.message : 'Update failed'); }
     finally { setInstallingUpdate(false); }
   };
-  if (!base || !selectedScenario || !selectedBudget) return <main className="fatal"><Flame /><h1>No scenarios found</h1><button className="button primary" onClick={() => setData(clone(defaultData))}>Restore defaults</button></main>;
+  if (!base || !selectedScenario || !selectedBudget) return <main className="fatal"><Flame /><h1>No scenarios found</h1><button className="button primary" onClick={() => setData(createInitialData())}>Start a new plan</button></main>;
   const delta = base.targetPoint.firePortfolio - base.targetPoint.fireTarget;
   const coastFireSentence = base.targetPoint.firePortfolio < base.targetPoint.fireTarget && base.coastFire?.reached
     ? <> However, you are on track for <strong className="positive-text">Coast FIRE</strong>.</>
@@ -165,13 +212,39 @@ export default function App() {
         ? `${money(contributionDifference)}/mo above amount needed`
         : `${money(-contributionDifference)}/mo more needed`;
   return <div className="app-shell">
-    <header className="topbar"><div className="brand"><span><Flame size={19} /></span><div><strong>FIRE Projector <span className="app-version">v{appVersion}</span></strong><small>{data.profile.mode === 'real' ? 'Today’s dollars' : 'Future nominal dollars'}</small></div></div><div className="top-actions"><button className="button ghost" onClick={() => void handleSave()} disabled={savingPlan}><Save size={16} /> <span>{savingPlan ? 'Saving…' : 'Save'}</span></button><div className="load-menu" ref={loadMenuRef}><button className="button ghost" onClick={handleToggleLoadMenu} aria-haspopup="menu" aria-expanded={loadMenuOpen}><FolderOpen size={16} /> <span>Load</span></button>{loadMenuOpen && <div className="load-menu-panel" role="menu" aria-label="Saved plans"><div className="load-menu-heading"><strong>Saved plans</strong><small>{savedPlans.length ? `${savedPlans.length} saved ${savedPlans.length === 1 ? 'plan' : 'plans'}` : 'No saves yet'}</small></div>{savedPlans.length ? savedPlans.map((saved) => <button key={saved.id} className="load-menu-item" role="menuitem" onClick={() => handleLoad(saved)}><span><strong>{saved.name}</strong><small>Saved {new Date(saved.savedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}</small></span></button>) : <p className="load-menu-empty">Use Save to create a named plan.</p>}</div>}</div><button className="button ghost" onClick={handleRefresh}><RefreshCcw size={16} /> <span>Refresh app</span></button><button className="button ghost" onClick={handleUpdate} disabled={checkingUpdate || installingUpdate}><RefreshCcw size={16} /> <span>{checkingUpdate ? 'Checking…' : installingUpdate ? 'Downloading…' : 'Check updates'}</span></button><button className="button danger" onClick={handleReset}><RefreshCcw size={16} /> <span>Reset</span></button></div></header>
+    <header className="topbar">
+      <div className="brand"><span><img src="./icons/tiger-white-orange-192.png" alt="" width={34} height={34} /></span><div><strong>FIRE Projector <span className="app-version">v{appVersion}</span></strong><small>{data.profile.mode === 'real' ? 'Today’s dollars' : 'Future nominal dollars'}</small></div></div>
+      <div className="top-actions">
+        <button className="button ghost" aria-label="Save current plan" title="Save current plan" onClick={() => void handleSave()} disabled={savingPlan}><Save size={16} /> <span>{savingPlan ? 'Saving…' : 'Save'}</span></button>
+        <div className="load-menu" ref={loadMenuRef}>
+          <button className="button ghost" aria-label="Open saved plans" title="Open saved plans" onClick={handleToggleLoadMenu} aria-haspopup="menu" aria-expanded={loadMenuOpen}><FolderOpen size={16} /> <span>Load</span></button>
+          {loadMenuOpen && <div className="load-menu-panel" role="menu" aria-label="Saved plans">
+            <div className="load-menu-heading"><strong>Saved plans</strong><small>{savedPlans.length ? `${savedPlans.length} saved ${savedPlans.length === 1 ? 'plan' : 'plans'}` : 'No saves yet'}</small></div>
+            {savedPlans.length ? savedPlans.map((saved) => <div className="load-menu-plan-row" key={saved.id} role="none">
+              <button className="load-menu-item" role="menuitem" onClick={() => handleLoad(saved)}>
+                <span><strong>{saved.name}</strong><small>Saved {new Date(saved.savedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}</small></span>
+              </button>
+              <button className="load-menu-delete" role="menuitem" aria-label={`Delete saved plan “${saved.name}”`} title="Delete saved plan" disabled={deletingSavedPlanId !== null} onClick={() => void handleDeleteSavedPlan(saved)}><Trash2 size={15} /></button>
+            </div>) : <p className="load-menu-empty">Use Save to create a named plan.</p>}
+          </div>}
+        </div>
+        {window.fireUpdater && <>
+          <button className="button ghost" onClick={handleRefresh}><RefreshCcw size={16} /> <span>Refresh app</span></button>
+          <button className="button ghost" onClick={handleUpdate} disabled={checkingUpdate || installingUpdate}><RefreshCcw size={16} /> <span>{checkingUpdate ? 'Checking…' : installingUpdate ? 'Downloading…' : 'Check updates'}</span></button>
+        </>}
+        <button className="button danger" aria-label="Reset planner" title="Reset planner" onClick={handleReset}><RefreshCcw size={16} /> <span>Reset</span></button>
+      </div>
+    </header>
 
     <main className="workspace">
-      <InputHub data={data} setData={setData} scenario={selectedScenario} setSelected={setSelected} phaseId={fireInvestingPhaseId} setPhaseId={setPhaseId} />
+      {!window.fireUpdater && <div className="web-app-tools"><button className="button ghost" onClick={handleRefresh} title="Load the latest app while keeping your saved plans"><RefreshCcw size={16} /> Refresh app</button></div>}
+      <InputHub key={inputRevision} initialTab={inputRevision > 0 ? 'plan' : 'money'} data={data} setData={setData} scenario={selectedScenario} setSelected={setSelected} phaseId={fireInvestingPhaseId} setPhaseId={setPhaseId} />
       <div id="results" className="results-area">
+      {base.profile.currentAge <= 0 || base.profile.retirementAge <= base.profile.currentAge || base.profile.maxAge <= base.profile.retirementAge || !Number.isFinite(base.fireNumber) || base.fireNumber <= 0 ? <Section title="Start your plan" eyebrow="Your results">
+        <p className="muted" style={{ padding: '18px 22px 22px', margin: 0 }}>Enter your ages, retirement spending, and withdrawal rate in Plan to see projections.</p>
+      </Section> : <>
       <div className="results-heading"><div><span className="eyebrow">Your results</span><h2>{selectedScenario.name}</h2></div></div>
-      <section className="hero"><div><span className="eyebrow">{selectedScenario.name}</span><h1>{base.firePoint && base.firePoint.age <= base.profile.retirementAge ? 'You’re on track.' : 'Your target needs a nudge.'}</h1><p>{base.firePoint ? <>At your current plan, <strong>{base.scenario.name}</strong> reaches financial independence at <strong>age {base.firePoint.age.toFixed(1)}</strong>—<span className={status.tone === 'positive' ? 'positive-text' : 'negative-text'}>{status.text}</span>.</> : <>This scenario does not reach its FIRE target by age {base.profile.maxAge}.{!coastFireSentence && <> Increase contributions, reduce spending, or revisit the timeline.</>}</>}{coastFireSentence}</p></div><div className={`hero-status ${status.tone}`}><span>{status.tone === 'positive' ? <Check size={17} /> : <Gauge size={17} />}</span><div><small>At target age {base.profile.retirementAge}</small><strong>{delta >= 0 ? '+' : ''}{money(delta, true)}</strong><em>{delta >= 0 ? 'projected surplus' : 'projected shortfall'}</em></div></div></section>
+      <section className="hero"><div><h1>{base.firePoint && base.firePoint.age <= base.profile.retirementAge ? 'You’re on track.' : 'Your target needs a nudge.'}</h1><p>{base.firePoint ? <>At your current plan, <strong>{base.scenario.name}</strong> reaches financial independence at <strong>age {base.firePoint.age.toFixed(1)}</strong>—<span className={status.tone === 'positive' ? 'positive-text' : 'negative-text'}>{status.text}</span>.</> : <>This scenario does not reach its FIRE target by age {base.profile.maxAge}.{!coastFireSentence && <> Increase contributions, reduce spending, or revisit the timeline.</>}</>}{coastFireSentence}</p></div><div className={`hero-status ${status.tone}`}><span>{status.tone === 'positive' ? <Check size={17} /> : <Gauge size={17} />}</span><div><small>At target age {base.profile.retirementAge}</small><strong>{delta >= 0 ? '+' : ''}{money(delta, true)}</strong><em>{delta >= 0 ? 'projected surplus' : 'projected shortfall'}</em></div></div></section>
 
       <section className="metrics-grid">
         <Metric label="Total net worth" value={money(base.currentNetWorth)} sub="All included accounts" info="Everything included in net worth, whether or not it funds FIRE." />
@@ -194,8 +267,9 @@ export default function App() {
       <BudgetSummary data={data} selectedScenario={selectedScenario} selectedBudget={selectedBudget} comparisonBudgets={comparisonBudgets} setSelected={setSelected} />
 
       {projectedSelectedScenario && <Sensitivity data={projectionData} selectedScenario={projectedSelectedScenario} />}
+      </>}
       </div>
-      <footer><div><Landmark size={18} /><strong>Private by design</strong><span>Your plan is saved on this computer. No login or backend.</span></div><p>This tool is for planning and educational purposes. Investment returns, inflation, tax laws, withdrawal rules, and future expenses are uncertain. Projections are estimates, not guarantees or individualized tax/legal advice.</p></footer>
+      <footer><div><Landmark size={18} /><strong>Private by design</strong><span>Your plan is saved on this device. No login or backend.</span></div><p>This tool is for planning and educational purposes. Investment returns, inflation, tax laws, withdrawal rules, and future expenses are uncertain. Projections are estimates, not guarantees or individualized tax/legal advice.</p></footer>
     </main>
     {updatePromptOpen && update?.updateAvailable && update.latestVersion && update.downloadUrl && <div className="update-modal-backdrop" role="presentation" onMouseDown={() => setUpdatePromptOpen(false)}>
       <div className="update-modal" role="dialog" aria-modal="true" aria-labelledby="update-modal-title" onMouseDown={(event) => event.stopPropagation()}>

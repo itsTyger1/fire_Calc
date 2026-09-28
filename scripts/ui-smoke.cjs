@@ -5,6 +5,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const assert = require('node:assert/strict');
 const { version: packageVersion } = require('../package.json');
+// Keep the populated regression fixture separate from a new user's blank plan.
+const populatedFixture = require('./planner-fixture.cjs');
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'fire-projector-test-'));
 app.setPath('userData', profile);
 app.disableHardwareAcceleration();
@@ -18,6 +20,11 @@ ipcMain.handle('save-plan-file', async (_event, _name, data) => {
   return { canceled: false, name: 'Retirement test', filePath: path.join(profile, 'Retirement test.json') };
 });
 ipcMain.handle('list-plan-files', async () => savedPlan ? [savedPlan] : []);
+ipcMain.handle('delete-plan-file', async (_event, id) => {
+  if (!savedPlan || savedPlan.id !== id) return false;
+  savedPlan = undefined;
+  return true;
+});
 ipcMain.handle('get-app-version', () => packageVersion);
 app.whenReady().then(async () => {
   const window = new BrowserWindow({ show: false, width: 1450, height: 1050, webPreferences: { partition: 'ui-smoke', contextIsolation: true, nodeIntegration: false, preload: path.join(__dirname, '../electron/preload.cjs') } });
@@ -93,6 +100,26 @@ app.whenReady().then(async () => {
     assert.equal(await evaluate(() => document.querySelectorAll('[role="tab"]').length), 3);
     assert.equal(await evaluate(() => document.querySelectorAll('#results input').length), 0);
     assert.equal(await evaluate(() => document.getElementById('inputs').compareDocumentPosition(document.getElementById('results')) & Node.DOCUMENT_POSITION_FOLLOWING), 4);
+    assert.equal(await inputValue('Taxable Brokerage monthly contribution'), '0');
+    await tab('plan');
+    const checkDefaults = async () => {
+      assert.equal(await inputValue('Current age'), '0');
+      assert.equal(await inputValue('Annual retirement spending'), '0');
+      assert.equal(await inputValue('Maximum projection age · shared'), '100');
+      assert.equal(await inputValue('Expected nominal return'), '10');
+      assert.equal(await inputValue('Inflation rate'), '3.2');
+      assert.equal(await inputValue('Safe withdrawal rate'), '4');
+      assert.equal(await inputValue('Expected real return · calculated'), '6.59');
+    };
+    await checkDefaults();
+    await edit('Expected nominal return', 8);
+    await edit('Maximum projection age · shared', 90);
+    await tab('money');
+    await evaluate(() => { window.confirm = () => true; document.querySelector('[aria-label="Reset planner"]').click(); }); await wait();
+    assert.equal(await evaluate(() => document.getElementById('tab-plan').getAttribute('aria-selected')), 'true');
+    await checkDefaults();
+    await evaluate((fixture) => localStorage.setItem('fire-projector-v1', JSON.stringify(fixture)), populatedFixture);
+    await window.webContents.reload(); await wait();
     assert.equal(await inputValue('Taxable Brokerage monthly contribution'), '850');
     assert.match(await remainder(), /522/);
     assert.equal(await evaluate(() => document.querySelectorAll('.budget-row select').length), 0);
@@ -186,6 +213,12 @@ app.whenReady().then(async () => {
     await evaluate(() => { const button = [...document.querySelectorAll('.top-actions button')].find((el) => el.textContent.trim() === 'Load'); button.focus(); button.click(); }); await wait();
     await evaluate(() => document.querySelector('.load-menu-item').click()); await wait();
     assert.equal(await inputValue('Taxable Brokerage monthly contribution'), '1000');
+    await evaluate(() => [...document.querySelectorAll('.top-actions button')].find((el) => el.textContent.trim() === 'Load').click()); await wait();
+    await evaluate(() => { window.confirm = () => false; document.querySelector('.load-menu-delete').click(); }); await wait();
+    assert.equal(await evaluate(() => document.querySelectorAll('.load-menu-item').length), 1);
+    await evaluate(() => { window.confirm = () => true; document.querySelector('.load-menu-delete').click(); }); await wait();
+    assert.equal(await evaluate(() => document.querySelectorAll('.load-menu-item').length), 0);
+    assert.equal(await evaluate(() => document.querySelector('.load-menu-heading small')?.textContent), 'No saves yet');
     saveOutcome = 'cancel';
     await clickSave();
     assert.equal(await evaluate(() => Boolean(document.querySelector('.save-confirmation'))), false);
