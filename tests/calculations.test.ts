@@ -3,7 +3,7 @@ import { defaultData } from '../src/domain/defaults';
 import { addAccountToData, removeAccountFromData } from '../src/domain/accounts';
 import { copyMonthlyPhaseValues, resetMonthlyPhaseValues } from '../src/domain/budget';
 import {
-  aggregateAccounts, annualToMonthlyRate, applyScenarioOverrides, calculateFireNumber, calculateCoastFire,
+  aggregateAccounts, annualToMonthlyRate, applyScenarioOverrides, calculateFireNumber, calculateRetirementFunding,
   bridgeMetrics, emergencyFundMetrics, findFireCrossing, growAccountOneMonth, projectCore,
   projectScenario, resolvePhase, scenarioBudgetMetrics, solveRequiredAdditionalContribution,
   solveRequiredContributionScale, nominalReturnFromReal, realReturnFromNominal,
@@ -14,20 +14,21 @@ const profile = { ...defaultData.profile, currentAge: 30, retirementAge: 31, max
 const account: Account = { ...defaultData.accounts[3], id: 'test', balance: 10000, monthlyContribution: 100, employerContribution: 50, fireEligible: true };
 
 describe('financial calculations', () => {
-  it('recognizes Coast FIRE below a custom target using planned contributions until retirement', () => {
+  it('recognizes funded retirement below a custom target using planned contributions until retirement', () => {
     const data = structuredClone(defaultData);
     data.profile = { ...profile, currentAge: 60, retirementAge: 65, maxAge: 70, customFireNumber: 1000000, rothTransfers: [], mode: 'real' };
     data.accounts = [{ ...account, balance: 420001, annualReturn: 0, returnMode: 'custom', monthlyContribution: 0, employerContribution: 0 }];
     data.phases = [];
     const result = projectScenario(data, { ...data.scenarios[0], overrides: {} });
     expect(result.targetPoint.firePortfolio).toBeLessThan(result.targetPoint.fireTarget);
-    expect(result.coastFire?.reached).toBe(true);
-    expect(result.coastFire?.endingBalance).toBeCloseTo(1);
+    expect(result.retirementFunding.funded).toBe(true);
+    expect(result.retirementFunding.endingBalance).toBeCloseTo(1);
+    expect(result.coastFire?.eligibilityPoint).toBeNull();
     data.accounts[0].balance = 419000;
-    expect(projectScenario(data, { ...data.scenarios[0], overrides: {} }).coastFire?.reached).toBe(false);
+    expect(projectScenario(data, { ...data.scenarios[0], overrides: {} }).retirementFunding.funded).toBe(false);
     data.accounts[0].monthlyContribution = 10;
     data.accounts[0].employerContribution = 10;
-    expect(projectScenario(data, { ...data.scenarios[0], overrides: {} }).coastFire).toEqual({ reached: true, endingBalance: 200 });
+    expect(projectScenario(data, { ...data.scenarios[0], overrides: {} }).retirementFunding).toMatchObject({ funded: true, endingBalance: 200 });
   });
   it('matches a growing retirement chart with scenario contribution phase overrides', () => {
     const data = structuredClone(defaultData);
@@ -38,22 +39,21 @@ describe('financial calculations', () => {
     expect(result.targetPoint.firePortfolio).toBeLessThan(result.targetPoint.fireTarget);
     const retirement = result.points.filter((point) => point.projectionPhase === 'retirement');
     expect(retirement.every((point, index) => index === 0 || point.firePortfolio > retirement[index - 1].firePortfolio)).toBe(true);
-    expect(result.coastFire).toEqual({ reached: true, endingBalance: result.points.at(-1)!.firePortfolio });
-    expect(projectScenario(data, { ...data.scenarios[0], overrides: {} }).coastFire?.reached).toBe(false);
+    expect(result.retirementFunding).toMatchObject({ funded: true, endingBalance: result.points.at(-1)!.firePortfolio });
+    expect(projectScenario(data, { ...data.scenarios[0], overrides: {} }).retirementFunding.funded).toBe(false);
   });
-  it('checks the entire age-100 horizon and applies inflation to coast spending', () => {
+  it('checks at least the age-100 horizon and applies inflation to retirement spending', () => {
     const coastProfile = { ...profile, currentAge: 60, retirementAge: 65, maxAge: 66, rothTransfers: [], mode: 'real' as const };
     const coastAccount = { ...account, balance: 420001, annualReturn: 0, returnMode: 'custom' as const };
-    expect(calculateCoastFire(coastProfile, [coastAccount])?.reached).toBe(true);
-    expect(calculateCoastFire({ ...coastProfile, mode: 'nominal', inflationRate: 0.03 }, [coastAccount])?.reached).toBe(false);
-    expect(calculateCoastFire({ ...coastProfile, maxAge: 110 }, [coastAccount])).toEqual(calculateCoastFire(coastProfile, [coastAccount]));
-    expect(calculateCoastFire({ ...coastProfile, retirementAge: 100 }, [coastAccount])).toBeNull();
+    expect(calculateRetirementFunding(coastProfile, [coastAccount]).funded).toBe(true);
+    expect(calculateRetirementFunding({ ...coastProfile, mode: 'nominal', inflationRate: 0.03 }, [coastAccount]).funded).toBe(false);
+    expect(calculateRetirementFunding({ ...coastProfile, maxAge: 110 }, [coastAccount])).toMatchObject({ horizonAge: 110, funded: false });
   });
-  it('uses scenario spending overrides for Coast FIRE', () => {
+  it('uses scenario spending overrides for retirement funding', () => {
     const data = structuredClone(defaultData);
     data.profile = { ...profile, currentAge: 60, retirementAge: 65, maxAge: 70, rothTransfers: [], mode: 'real' };
     data.accounts = [{ ...account, balance: 420001, annualReturn: 0, returnMode: 'custom' }];
-    expect(projectScenario(data, { ...data.scenarios[0], overrides: { annualSpending: 24000 } }).coastFire?.reached).toBe(false);
+    expect(projectScenario(data, { ...data.scenarios[0], overrides: { annualSpending: 24000 } }).retirementFunding.funded).toBe(false);
   });
   it('does not report a hypothetical crossing when planned retirement depletes the portfolio', () => {
     const data = structuredClone(defaultData);
@@ -65,26 +65,29 @@ describe('financial calculations', () => {
     const result = projectScenario(data, scenario);
     expect(result.firePoint).toBeNull();
     expect(result.retirementSummary.depletionPoint).not.toBeNull();
-    expect(bridgeMetrics(result).usesTargetAge).toBe(true);
+    expect(bridgeMetrics(result).startAge).toBe(31);
     expect(bridgeMetrics(result).years).toBe(28.5);
   });
-  it('starts the bridge at an earlier FIRE crossing and handles access at 59.5', () => {
+  it('starts the bridge at the selected retirement age even when the target is reached earlier', () => {
     const data = structuredClone(defaultData);
     data.profile = { ...profile, retirementAge: 55, maxAge: 60, customFireNumber: 10000, mode: 'real' };
     data.accounts = [{ ...account, balance: 10000, annualReturn: 0 }];
     data.phases = [];
     const result = projectScenario(data, { ...data.scenarios[0], overrides: {} });
     expect(result.firePoint).toEqual(result.points[0]);
-    expect(bridgeMetrics(result)).toMatchObject({ startAge: 30, years: 29.5, need: 354000, usesTargetAge: false });
-    const later = { ...result, firePoint: { ...result.points[0], age: 59.5 } };
+    expect(bridgeMetrics(result)).toMatchObject({ startAge: 55, years: 4.5 });
+    expect(bridgeMetrics(result).need).toBeCloseTo(54000);
+    data.profile.retirementAge = 59.5;
+    const later = projectScenario(data, { ...data.scenarios[0], overrides: {} });
     expect(bridgeMetrics(later).need).toBe(0);
     expect(bridgeMetrics(later).years).toBe(0);
   });
   it('inflates each bridge month in nominal mode', () => {
-    const result = projectScenario(defaultData, defaultData.scenarios[0]);
-    const testResult = { ...result, profile: { ...result.profile, annualSpending: 12000, mode: 'nominal' as const, inflationRate: 0.12 }, firePoint: { ...result.points[0], age: 59.25, month: 12 } };
+    const data = structuredClone(defaultData);
+    data.profile = { ...data.profile, currentAge: 58.25, retirementAge: 59.25, annualSpending: 12000, mode: 'nominal', inflationRate: 0.12 };
+    const result = projectScenario(data, { ...data.scenarios[0], overrides: {} });
     const expected = [12, 13, 14].reduce((sum, month) => sum + 1000 * Math.pow(1.12, month / 12), 0);
-    expect(bridgeMetrics(testResult).need).toBeCloseTo(expected);
+    expect(bridgeMetrics(result).need).toBeCloseTo(expected);
   });
   it('calculates the FIRE number', () => expect(calculateFireNumber(52500, 0.035)).toBeCloseTo(1500000));
   it('keeps real and nominal returns consistent with inflation', () => {

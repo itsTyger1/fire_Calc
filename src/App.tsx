@@ -6,7 +6,8 @@ import { projectScenario, scenarioBudgetMetrics } from './domain/calculations';
 import { deleteSavedPlan as deleteNamedPlan, listSavedPlans, loadData, resetData, saveData, saveNamedPlan, type SavedPlan } from './lib/persistence';
 import { InputHub } from './components/InputHub';
 import { BudgetSummary } from './components/BudgetSummary';
-import { Analytics, BridgeAndEmergency, monthStatus, RetirementDrawdown, Sensitivity, SummaryTable, TimelineChart } from './components/Results';
+import { Analytics, BridgeAndEmergency, monthStatus, RetirementOutlook, Sensitivity, SummaryTable, TimelineChart } from './components/Results';
+import { fundedTargetCrossing, retirementFundingMessage, retirementHeadline, retirementReady, spendingGapPoint } from './domain/outlook';
 import { age, Metric, money, percent, Section } from './components/ui';
 import packageJson from '../package.json';
 type UpdateCheck = { currentVersion: string; latestVersion?: string; updateAvailable: boolean; downloadUrl?: string | null; releaseUrl?: string; noPublishedRelease?: boolean };
@@ -31,6 +32,7 @@ export default function App() {
   const [appVersion, setAppVersion] = useState(fallbackAppVersion);
   const [requestedPhaseId, setPhaseId] = useState<string>();
   const [inputRevision, setInputRevision] = useState(0);
+  const [fundingHorizonRequest, setFundingHorizonRequest] = useState(0);
   useEffect(() => {
     if (inputRevision === 0) return;
     const frame = window.requestAnimationFrame(() => document.getElementById('inputs')?.scrollIntoView({ block: 'start', behavior: 'instant' }));
@@ -194,10 +196,8 @@ export default function App() {
     finally { setInstallingUpdate(false); }
   };
   if (!base || !selectedScenario || !selectedBudget) return <main className="fatal"><Flame /><h1>No scenarios found</h1><button className="button primary" onClick={() => setData(createInitialData())}>Start a new plan</button></main>;
-  const delta = base.targetPoint.firePortfolio - base.targetPoint.fireTarget;
-  const coastFireSentence = base.targetPoint.firePortfolio < base.targetPoint.fireTarget && base.coastFire?.reached
-    ? <> However, you are on track for <strong className="positive-text">Coast FIRE</strong>.</>
-    : null;
+  const targetCrossing = fundedTargetCrossing(base);
+  const spendingGap = spendingGapPoint(base.retirementFunding);
   const fireProgress = base.currentFirePortfolio / Math.max(1, base.fireNumber);
   const monthlyFireInvesting = base.plannedPersonalMonthly + base.plannedEmployerMonthly;
   const requiredMonthlyFireInvesting = Number.isFinite(base.requiredPersonalMonthly)
@@ -251,20 +251,22 @@ export default function App() {
         <p className="muted" style={{ padding: '18px 22px 22px', margin: 0 }}>Enter your ages, retirement spending, and withdrawal rate in Plan to see projections.</p>
       </Section> : <>
       <div className="results-heading"><div><span className="eyebrow">Your results</span><h2>{selectedScenario.name}</h2></div></div>
-      <section className="hero"><div><h1>{base.firePoint && base.firePoint.age <= base.profile.retirementAge ? 'You’re on track.' : 'Your target needs a nudge.'}</h1><p>{base.firePoint ? <>At your current plan, <strong>{base.scenario.name}</strong> reaches financial independence at <strong>age {base.firePoint.age.toFixed(1)}</strong>—<span className={status.tone === 'positive' ? 'positive-text' : 'negative-text'}>{status.text}</span>.</> : <>This scenario does not reach its FIRE target by age {base.profile.maxAge}.{!coastFireSentence && <> Increase contributions, reduce spending, or revisit the timeline.</>}</>}{coastFireSentence}</p></div><div className={`hero-status ${status.tone}`}><span>{status.tone === 'positive' ? <Check size={17} /> : <Gauge size={17} />}</span><div><small>At target age {base.profile.retirementAge}</small><strong>{delta >= 0 ? '+' : ''}{money(delta, true)}</strong><em>{delta >= 0 ? 'projected surplus' : 'projected shortfall'}</em></div></div></section>
+      <section className="hero"><div><h1>{retirementHeadline(base)}</h1><p>{retirementFundingMessage(base)}</p></div><div className={`hero-status ${status.tone}`}><span>{status.tone === 'positive' ? <Check size={17} /> : <Gauge size={17} />}</span><div><small>Living expenses</small><strong>{spendingGap ? `Age ${spendingGap.age.toFixed(1)}` : retirementReady(base) ? `Through ${base.retirementFunding.horizonAge}` : 'Tax gap'}</strong><em>{spendingGap ? 'spending falls short' : retirementReady(base) ? 'projected covered' : 'conversion taxes need funding'}</em></div></div></section>
+      <RetirementOutlook result={base} onViewHorizon={() => {
+        setFundingHorizonRequest((request) => request + 1);
+        document.getElementById('scenario-timelines')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      }} />
 
       <section className="metrics-grid">
-        <Metric label="Total net worth" value={money(base.currentNetWorth)} sub="All included accounts" info="Everything included in net worth, whether or not it funds FIRE." />
-        <Metric label="FIRE portfolio" value={money(base.currentFirePortfolio)} sub={`${percent(fireProgress)} of target`} tone="accent" info="Only accounts marked FIRE eligible." />
+        <Metric label="Current total net worth" value={money(base.currentNetWorth)} sub="All included accounts" info="Everything included in net worth, whether or not it funds FIRE." />
+        <Metric label="Current FIRE Portfolio" value={money(base.currentFirePortfolio)} sub={`${percent(fireProgress)} of target`} tone="accent" info="Only accounts marked FIRE eligible." />
         <Metric label="FIRE goal" value={money(base.fireNumber)} sub={base.profile.customFireNumber == null ? "Based on spending and withdrawal rate" : "Custom target"} />
-        <Metric label="Projected FIRE" value={age(base.firePoint?.age)} sub={base.firePoint ? new Date(base.firePoint.date).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) : `Not by age ${base.profile.maxAge}`} tone={base.firePoint && base.firePoint.age <= base.profile.retirementAge ? 'positive' : 'negative'} />
+        <Metric label="FIRE target crossing" value={targetCrossing ? age(targetCrossing.age) : spendingGap ? 'Spending gap' : 'Not reached'} sub={targetCrossing ? `${new Date(targetCrossing.date).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}${retirementReady(base) ? '' : ' · Spending coverage needs attention'}` : spendingGap ? `Spending falls short at age ${spendingGap.age.toFixed(1)}` : `Not by age ${base.profile.maxAge}`} tone={retirementReady(base) && targetCrossing && targetCrossing.age <= base.profile.retirementAge ? 'positive' : 'negative'} info="Target crossings after a spending gap are not shown as milestones. Reaching your FIRE target alone does not mean every living expense can be paid." />
         <Metric label="Monthly FIRE investing" value={`${money(monthlyFireInvesting)}/mo`} sub={<><span className="metric-secondary-value">Required monthly: {money(requiredMonthlyFireInvesting)}/mo</span><span>{contributionStatus}</span></>} tone={contributionDifference >= 0 ? 'positive' : 'negative'} info="The main number is the total currently budgeted for the FIRE investing phase, including employer contributions. The projection uses all contribution phases in sequence; the smaller number is the total monthly amount needed to reach the FIRE goal while employer contributions remain constant." />
       </section>
 
-      <RetirementDrawdown result={base} />
-
-      <Section title="Scenario timelines" eyebrow="Compare every path" action={<span className="panel-note"><CircleDollarSign size={14} /> Monthly compounding</span>}>
-        <TimelineChart results={results} selected={base.scenario.id} onSelect={setSelected} />
+      <Section id="scenario-timelines" title="Scenario timelines" eyebrow="Compare every path" action={<span className="panel-note"><CircleDollarSign size={14} /> Monthly compounding</span>}>
+        <TimelineChart results={results} selected={base.scenario.id} fundingHorizonRequest={fundingHorizonRequest} />
       </Section>
 
       <Section title="Scenario scorecard" eyebrow="Click a row to focus"><SummaryTable results={results} selected={base.scenario.id} onSelect={setSelected} /></Section>

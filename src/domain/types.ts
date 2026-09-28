@@ -168,6 +168,11 @@ export interface ProjectionPoint {
   monthlyWithdrawal: number;
   cumulativeWithdrawals: number;
   cumulativeWithdrawalShortfall: number;
+  cumulativeAccessShortfall: number;
+  cumulativeBridgeNeed: number;
+  cumulativeBridgeWithdrawals: number;
+  cumulativeBridgeShortfall: number;
+  spendable: number;
   rothAccessibleBasis: number;
   cumulativeConversionTax: number;
   cumulativeConversionTaxPaid: number;
@@ -187,10 +192,42 @@ export interface RetirementSummary {
   depletionPoint: ProjectionPoint | null;
 }
 
+export interface RetirementFunding extends RetirementSummary {
+  horizonAge: number;
+  funded: boolean;
+  firstUnfundedAge: number | null;
+  firstAccessGapAge: number | null;
+  unpaidConversionTax: number;
+  laterFirePoint: ProjectionPoint | null;
+  points: ProjectionPoint[];
+}
+
+export interface RetirementBridge {
+  startAge: number;
+  years: number;
+  need: number;
+  accessible: number;
+  fundedAmount: number;
+  shortfall: number;
+  conversionTax: number;
+  firstGapAge: number | null;
+  funded: boolean;
+}
+
+export interface CoastFireResult {
+  reached: boolean;
+  eligibilityPoint: ProjectionPoint | null;
+  retirementTarget: number;
+  balanceAtRetirement: number | null;
+  funding: RetirementFunding | null;
+  targetFundingGap: 'spending' | 'conversion-tax' | null;
+}
+
 export interface ScenarioResult {
   scenario: Scenario;
   profile: Profile;
   accounts: Account[];
+  phases: ContributionPhase[];
   points: ProjectionPoint[];
   fireNumber: number;
   firePoint: ProjectionPoint | null;
@@ -204,5 +241,8 @@ export interface ScenarioResult {
   requiredContributionScale: number;
   contributionGap: number;
   retirementSummary: RetirementSummary;
-  coastFire: { reached: boolean; endingBalance: number } | null;
+  retirementFunding: RetirementFunding;
+  portfolioFunding: RetirementFunding;
+  bridge: RetirementBridge;
+  coastFire: CoastFireResult | null;
 }

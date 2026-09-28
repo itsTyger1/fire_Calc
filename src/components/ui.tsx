@@ -64,8 +64,9 @@ export function CommittedNumberInput({ value, onCommit, min, max, step = 1, aria
     min={min}
     max={max}
     onChange={(event) => { editedRef.current = true; setDraft(event.target.value); }}
-    onFocus={(event) => event.currentTarget.select()}
-    onClick={(event) => { if (!pending) event.currentTarget.select(); }}
+    // Let the browser place the caret on clicks/taps and handle mobile
+    // long-press selection. Only an explicit double-click selects everything.
+    onDoubleClick={(event) => event.currentTarget.select()}
     onBlur={commit}
     onKeyDown={(event) => {
       if (event.key === 'Enter') {
@@ -107,8 +108,8 @@ export function Toggle({ label, checked, onChange, detail }: { label: string; ch
   return <label className="toggle-row"><span><strong>{label}</strong>{detail && <small>{detail}</small>}</span><button type="button" className={`toggle ${checked ? 'on' : ''}`} onClick={() => onChange(!checked)} aria-pressed={checked}><span /></button></label>;
 }
 
-export function Section({ title, eyebrow, action, children, className = '' }: { title: string; eyebrow?: string; action?: ReactNode; children: ReactNode; className?: string }) {
-  return <ColorCard as="section" className={`panel ${className}`}><header className="panel-head"><div>{eyebrow && <span className="eyebrow">{eyebrow}</span>}<h2>{title}</h2></div>{action}</header>{children}</ColorCard>;
+export function Section({ title, eyebrow, action, children, className = '', id }: { title: string; eyebrow?: string; action?: ReactNode; children: ReactNode; className?: string; id?: string }) {
+  return <ColorCard as="section" id={id} className={`panel ${className}`}><header className="panel-head"><div>{eyebrow && <span className="eyebrow">{eyebrow}</span>}<h2>{title}</h2></div>{action}</header>{children}</ColorCard>;
 }
 
 export function Metric({ label, value, sub, tone = 'default', info }: { label: string; value: ReactNode; sub?: ReactNode; tone?: 'default' | 'positive' | 'negative' | 'accent'; info?: string }) {

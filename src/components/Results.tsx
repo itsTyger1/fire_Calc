@@ -1,5 +1,5 @@
-import { useId, useMemo, useState } from 'react';
-import { Bar, BarChart, CartesianGrid, Cell, ComposedChart, Legend, Line, LineChart, Pie, PieChart, ReferenceDot, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { useEffect, useId, useMemo, useState } from 'react';
+import { Bar, BarChart, CartesianGrid, Cell, ComposedChart, Legend, Line, LineChart, Pie, PieChart, ReferenceArea, ReferenceDot, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { TooltipContentProps } from 'recharts';
 import type { AppData, Scenario, ScenarioResult } from '../domain/types';
 import { chartColors, neonStyle, scenarioColor } from '../theme';
@@ -9,18 +9,14 @@ import { ChartSurface, useDockedChartTooltip } from './ChartInteraction';
 import { ColorCard } from './ColorCard';
 import { DraggableChartTooltip } from './DraggableChartTooltip';
 import { chartGlowDefinition } from './ChartGlow';
+import { coastFireMessage, fundedTargetCrossing, retirementFundingStatus, retirementReady, spendingGapPoint } from '../domain/outlook';
 const allocationColors = chartColors;
 
 export const monthStatus = (result: ScenarioResult) => {
-  if (!result.firePoint) return { text: 'Not reached by max age', tone: 'negative' as const };
-  const delta = (result.profile.retirementAge - result.firePoint.age) * 12;
-  if (Math.abs(delta) < 1) return { text: 'On target', tone: 'positive' as const };
-  return delta > 0
-    ? { text: `${Math.abs(delta / 12).toFixed(1)} years early`, tone: 'positive' as const }
-    : { text: `${Math.abs(delta / 12).toFixed(1)} years late`, tone: 'negative' as const };
+  return { text: retirementFundingStatus(result), tone: retirementReady(result) ? 'positive' as const : 'negative' as const };
 };
 
-interface ChartDatum { month: number; age: number; year: number; date: string; [key: string]: number | string }
+interface ChartDatum { month: number; age: number; year: number; date: string; [key: string]: number | string | null }
 interface TimelineTooltipItem { dataKey?: string | number; value?: number | string; color?: string; payload?: ChartDatum }
 
 const accountTooltip = ({ active, payload, label, highlightedKey }: Pick<TooltipContentProps, 'active' | 'payload' | 'label'> & { highlightedKey: string | null }) => {
@@ -40,16 +36,56 @@ const accountTooltip = ({ active, payload, label, highlightedKey }: Pick<Tooltip
   </div>;
 };
 
-export function TimelineChart({ results, selected, onSelect }: { results: ScenarioResult[]; selected: string; onSelect: (id: string) => void }) {
+export function TimelineChart({ results, selected, fundingHorizonRequest = 0 }: { results: ScenarioResult[]; selected: string; fundingHorizonRequest?: number }) {
   const glowId = `timeline-glow-${useId().replace(/:/g, '')}`;
   const [axis, setAxis] = useState<'age' | 'year'>('age');
-  const [range, setRange] = useState<'target' | '70' | 'max'>('70');
+  const [range, setRange] = useState<'target' | '70' | 'max' | 'horizon'>('max');
+  const [showCoast, setShowCoast] = useState(false);
+  const [showRemaining, setShowRemaining] = useState(false);
+  const [hiddenSeries, setHiddenSeries] = useState<Set<string>>(() => new Set());
+  useEffect(() => { if (fundingHorizonRequest > 0) setRange('horizon'); }, [fundingHorizonRequest]);
   const dockedTooltip = useDockedChartTooltip();
   const [highlightedScenario, setHighlightedScenario] = useState<string | null>(null);
   const [tooltipPortal, setTooltipPortal] = useState<HTMLDivElement | null>(null);
   const visible = results.filter((result) => result.scenario.visible);
+  const gaps = useMemo(() => new Map(results.map((result) => [result.scenario.id, spendingGapPoint(result.retirementFunding)])), [results]);
   const first = visible[0] ?? results[0];
-  const maxMonth = range === 'target' ? Math.max(...visible.map((r) => Math.ceil((r.profile.retirementAge - r.profile.currentAge) * 12))) : range === '70' ? Math.max(...visible.map((r) => Math.ceil((70 - r.profile.currentAge) * 12))) : Math.max(...visible.map((r) => r.points.length - 1));
+  const focused = visible.find((result) => result.scenario.id === selected) ?? first;
+  const coastKey = `${focused?.scenario.id}__coast`;
+  const coastShown = showCoast && !hiddenSeries.has(coastKey) && Boolean(focused?.coastFire?.eligibilityPoint);
+  const toggleSeries = (key: string) => {
+    setHighlightedScenario(null);
+    setHiddenSeries((previous) => {
+      const next = new Set(previous);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+  const toggleCoastPath = () => {
+    setHighlightedScenario(null);
+    if (coastShown) setShowCoast(false);
+    else {
+      setShowCoast(true);
+      setHiddenSeries((previous) => {
+        const next = new Set(previous);
+        next.delete(coastKey);
+        return next;
+      });
+    }
+  };
+  const coastFunding = showCoast ? focused?.coastFire?.funding ?? null : null;
+  const coastPoints = coastFunding?.points ?? null;
+  const maxMonth = Math.max(0, ...visible.map((result) => range === 'target' ? Math.round((result.profile.retirementAge - result.profile.currentAge) * 12) : range === '70' ? Math.min(result.retirementFunding.points.length - 1, Math.ceil((70 - result.profile.currentAge) * 12)) : range === 'horizon' ? result.retirementFunding.points.length - 1 : result.points.length - 1));
+  const horizonAge = Math.max(100, ...visible.map((result) => result.retirementFunding.horizonAge));
+  const pointsFor = (result: ScenarioResult) => range === 'max' ? result.points : result.retirementFunding.points;
+  const focusedGap = focused && !hiddenSeries.has(focused.scenario.id) ? gaps.get(focused.scenario.id) ?? null : null;
+  const reserveGapSpace = focusedGap && maxMonth > 0 && focusedGap.month <= maxMonth && focusedGap.month / maxMonth > (dockedTooltip ? 0.55 : 0.88);
+  const coastGap = coastFunding ? spendingGapPoint(coastFunding) : null;
+  const hasVisibleGap = visible.some((result) => {
+    if (hiddenSeries.has(result.scenario.id)) return false;
+    const gap = gaps.get(result.scenario.id);
+    return gap && gap.month <= maxMonth && gap.month < pointsFor(result).length - 1;
+  }) || Boolean(coastShown && coastGap && coastGap.month <= maxMonth);
   const chartData = useMemo(() => {
     if (!first) return [];
     const rows: ChartDatum[] = [];
@@ -57,24 +93,41 @@ export function TimelineChart({ results, selected, onSelect }: { results: Scenar
     for (let month = 0; month <= maxMonth; month += 3) months.add(month);
     visible.forEach((result) => {
       if (result.firePoint && result.firePoint.month <= maxMonth) months.add(result.firePoint.month);
+      const gap = gaps.get(result.scenario.id);
+      if (gap && gap.month <= maxMonth) months.add(gap.month);
     });
+    if (coastGap && coastGap.month <= maxMonth) months.add(coastGap.month);
+    if (focused?.coastFire?.eligibilityPoint && focused.coastFire.eligibilityPoint.month <= maxMonth) months.add(focused.coastFire.eligibilityPoint.month);
+    months.add(maxMonth);
     for (const month of [...months].sort((a, b) => a - b)) {
-      const point = first.points[Math.min(month, first.points.length - 1)];
+      const point = pointsFor(first)[Math.min(month, pointsFor(first).length - 1)];
       const date = new Date(point.date);
       const row: ChartDatum = { month, age: point.age, year: date.getFullYear() + date.getMonth() / 12, date: point.date };
       visible.forEach((result) => {
-        const item = result.points[Math.min(month, result.points.length - 1)];
+        const item = pointsFor(result)[month];
         if (item) {
-          row[result.scenario.id] = item.firePortfolio;
+          const gap = gaps.get(result.scenario.id);
+          row[result.scenario.id] = !gap || month <= gap.month ? item.firePortfolio : null;
+          row[`${result.scenario.id}__remaining`] = showRemaining && gap && month >= gap.month ? item.firePortfolio : null;
           row[`${result.scenario.id}__target`] = item.fireTarget;
         }
       });
+      if (coastPoints?.[month]) {
+        row[coastKey] = !coastGap || month <= coastGap.month ? coastPoints[month].firePortfolio : null;
+        row[`${coastKey}__remaining`] = showRemaining && coastGap && month >= coastGap.month ? coastPoints[month].firePortfolio : null;
+      }
       rows.push(row);
     }
     return rows;
-  }, [results, maxMonth]);
+  }, [results, maxMonth, range, coastPoints, coastKey, focused, coastFunding, showRemaining, gaps]);
   const tooltip = ({ active, payload, label, coordinate }: { active?: boolean; payload?: ReadonlyArray<TimelineTooltipItem>; label?: number | string; coordinate?: { x: number; y: number } }) => {
-    const portfolioPayload = payload?.filter((item) => visible.some((result) => result.scenario.id === String(item.dataKey))) ?? [];
+    const seen = new Set<string>();
+    const portfolioPayload = payload?.filter((item) => {
+      const key = String(item.dataKey).replace(/__remaining$/, '');
+      if (item.value == null || hiddenSeries.has(key) || seen.has(key) || !(visible.some((result) => result.scenario.id === key) || (coastShown && coastPoints && key === coastKey))) return false;
+      seen.add(key);
+      return true;
+    }) ?? [];
     if (!active || !portfolioPayload.length) return null;
     const anchor = portfolioPayload[0]?.payload;
     const anchorAge = Number(anchor?.age ?? label);
@@ -87,22 +140,27 @@ export function TimelineChart({ results, selected, onSelect }: { results: Scenar
         <span>{axis === 'age' ? dateLabel : `Age ${anchorAge.toFixed(1)}`}</span>
       </>}>
       {portfolioPayload.map((item) => {
-        const key = String(item.dataKey ?? '');
+        const key = String(item.dataKey ?? '').replace(/__remaining$/, '');
         const value = Number(item.value ?? 0);
-        const result = visible.find((r) => r.scenario.id === key);
+        const isCoast = key === coastKey;
+        const result = isCoast ? focused : visible.find((r) => r.scenario.id === key);
         const month = Number(item.payload?.month ?? 0);
-        const point = result?.points[Math.max(0, Math.min(Number.isFinite(month) ? month : 0, (result?.points.length ?? 1) - 1))];
+        const point = (isCoast ? coastPoints : result ? pointsFor(result) : null)?.[Math.max(0, Number.isFinite(month) ? month : 0)];
         if (!result) return null;
+        const gap = isCoast ? coastGap : gaps.get(result.scenario.id);
+        const afterGap = Boolean(gap && month >= gap.month);
         const delta = point ? value - point.fireTarget : 0;
         const signedDelta = `${delta >= 0 ? '+' : '−'}${money(Math.abs(delta))}`;
         return <div className="tooltip-row" key={key}>
-          <div className="tooltip-scenario"><span className="series-dot" data-series-active={highlightedScenario === key || undefined} style={{ background: item.color ?? scenarioColor(result.scenario.color), ...neonStyle(item.color ?? scenarioColor(result.scenario.color)) }} /><strong>{result.scenario.name}</strong></div>
+          <div className="tooltip-scenario"><span className="series-dot" data-series-active={highlightedScenario === key || undefined} style={{ background: item.color ?? scenarioColor(result.scenario.color), ...neonStyle(item.color ?? scenarioColor(result.scenario.color)) }} /><strong>{isCoast ? `${result.scenario.name} · Coast path` : result.scenario.name}</strong></div>
+          {afterGap && <p className="tooltip-gap-note">{month === gap!.month ? 'Spending gap starts here.' : 'Some spending is unpaid. This shows remaining investments.'}</p>}
           {point ? <dl className="tooltip-stats">
-            <div><dt>Phase</dt><dd>{point.projectionPhase === 'retirement' ? 'Retirement' : 'Accumulation'}</dd></div>
-            <div><dt>Portfolio</dt><dd>{money(value)}</dd></div>
+            <div><dt>Phase</dt><dd>{point.projectionPhase === 'retirement' ? 'Retirement' : isCoast && month >= result.coastFire!.eligibilityPoint!.month ? 'Coasting · no contributions' : 'Accumulation'}</dd></div>
+            <div><dt>{afterGap ? 'Remaining investments' : 'Investments'}</dt><dd>{money(value)}</dd></div>
             <div><dt>FIRE target</dt><dd>{money(point.fireTarget)}</dd></div>
             <div><dt>{delta >= 0 ? 'Above target' : 'Below target'}</dt><dd className={delta >= 0 ? 'positive-text' : 'negative-text'}>{signedDelta}</dd></div>
             {point.projectionPhase === 'retirement' && <div><dt>Planned withdrawal</dt><dd>{money(point.monthlyWithdrawal)}/mo</dd></div>}
+            {point.cumulativeWithdrawalShortfall >= 0.01 && <div><dt>Unpaid spending to date</dt><dd className="negative-text">{money(point.cumulativeWithdrawalShortfall)}</dd></div>}
             <div><dt>Contributions to date</dt><dd>{money(point.personalContributions + point.employerContributions)}</dd></div>
             <div><dt>Investment growth</dt><dd>{money(point.investmentGrowth)}</dd></div>
           </dl> : <small className="tooltip-unavailable">Value details unavailable</small>}
@@ -113,68 +171,90 @@ export function TimelineChart({ results, selected, onSelect }: { results: Scenar
 
   if (!first || !visible.length) return <div className="empty-chart">Show at least one scenario to draw the timeline.</div>;
   return <>
-    <p className="chart-phase-note muted">This projection uses every contribution phase in sequence, including emergency-fund saving before FIRE investing. The emergency phase ends when its cash target is reached.</p>
-    <div className="chart-controls"><div className="segmented"><button className={axis === 'age' ? 'active' : ''} onClick={() => setAxis('age')}>Age</button><button className={axis === 'year' ? 'active' : ''} onClick={() => setAxis('year')}>Calendar year</button></div><select value={range} onChange={(e) => setRange(e.target.value as typeof range)}><option value="target">Through target age</option><option value="70">Through age 70</option><option value="max">Full projection</option></select></div>
+    <p className="chart-phase-note muted">The main line shows investments while your planned living expenses can be paid. It ends if spending falls short.</p>
+    <div className="chart-controls"><div className="segmented"><button className={axis === 'age' ? 'active' : ''} onClick={() => setAxis('age')}>Age</button><button className={axis === 'year' ? 'active' : ''} onClick={() => setAxis('year')}>Calendar year</button></div>{hasVisibleGap && <button className="button secondary remaining-path-toggle" aria-pressed={showRemaining} onClick={() => setShowRemaining((show) => !show)}>{showRemaining ? 'Hide remaining investments' : 'Show remaining investments'}</button>}<button className="button secondary coast-path-toggle" aria-pressed={coastShown} disabled={!focused?.coastFire?.eligibilityPoint} onClick={toggleCoastPath}>{coastShown ? 'Hide Coast path' : 'Show Coast path'}</button><select aria-label="Timeline range" value={range} onChange={(e) => setRange(e.target.value as typeof range)}><option value="target">Through target age</option><option value="70">Through age 70</option><option value="max">Full projection</option><option value="horizon">Through age {horizonAge}</option></select></div>
+    {focusedGap && <p className="timeline-gap-note" role="note"><strong>{focused.scenario.name}: spending falls short at age {focusedGap.age.toFixed(1)}.</strong> {showRemaining && hasVisibleGap ? 'The dotted continuation shows remaining investments while some spending goes unpaid.' : 'Later investment growth does not cover this earlier spending gap.'}{focusedGap.month > maxMonth && ' Choose a longer timeline to see the gap.'}</p>}
+    {showRemaining && hasVisibleGap && !focusedGap && <p className="timeline-gap-note" role="note">Dotted continuations show remaining investments while some spending goes unpaid.</p>}
+    {coastShown && coastFunding && <p className="coast-path-note muted">Coast path: stop investing at age {focused.coastFire!.eligibilityPoint!.age.toFixed(1)} and cover living expenses with income until retirement at age {focused.profile.retirementAge.toFixed(1)}. Retirement spending is projected to be covered through age {coastFunding.horizonAge}.</p>}
     <ChartSurface className="main-chart" svgGlowId={glowId} onHighlightChange={setHighlightedScenario}><ResponsiveContainer width="100%" height="100%"><ComposedChart data={chartData} margin={{ top: 16, right: 18, bottom: 6, left: 4 }}>
       {chartGlowDefinition(glowId)}
+      <defs><marker id={`${glowId}-gap-arrow`} viewBox="0 0 6 6" refX={5} refY={3} markerWidth={6} markerHeight={6} orient="auto"><path d="M 0 0 L 6 3 L 0 6 Z" fill="var(--amber)" /></marker></defs>
       <CartesianGrid vertical={false} stroke="var(--line)" strokeDasharray="4 5" />
-      <XAxis dataKey={axis} type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => axis === 'age' ? Number(v).toFixed(0) : String(Math.floor(v))} stroke="var(--muted)" tickLine={false} axisLine={false} />
+      {focusedGap && focusedGap.month <= maxMonth && <ReferenceArea x1={axis === 'age' ? focusedGap.age : new Date(focusedGap.date).getFullYear() + new Date(focusedGap.date).getMonth() / 12} x2={Number(chartData.at(-1)?.[axis])} fill="var(--muted)" fillOpacity={0.07} strokeOpacity={0} />}
+      <XAxis dataKey={axis} type="number" domain={['dataMin', 'dataMax']} padding={{ right: reserveGapSpace ? 112 : 0 }} tickFormatter={(v) => axis === 'age' ? Number(v).toFixed(0) : String(Math.floor(v))} stroke="var(--muted)" tickLine={false} axisLine={false} />
       <YAxis tickFormatter={(v) => money(v, true)} stroke="var(--muted)" tickLine={false} axisLine={false} width={64} />
       <Tooltip content={tooltip as never} portal={tooltipPortal} active={dockedTooltip ? highlightedScenario !== null : undefined} isAnimationActive={false} cursor={{ stroke: 'var(--line-strong)', strokeDasharray: '3 5' }} wrapperStyle={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }} />
-      <Legend formatter={(id) => {
-        const result = visible.find((r) => r.scenario.id === id);
-        return <span className="series-label" data-series-active={highlightedScenario === String(id) || undefined} style={{ color: result ? scenarioColor(result.scenario.color) : undefined, ...neonStyle(result ? scenarioColor(result.scenario.color) : chartColors[0]) }}>{result?.scenario.name ?? id}</span>;
-      }} onClick={(item) => onSelect(String(item.dataKey))} />
-      {visible.map((result, index) => <Line key={`target-${result.scenario.id}`} dataKey={`${result.scenario.id}__target`} data-chart-key={result.scenario.id} stroke={scenarioColor(result.scenario.color)} style={neonStyle(scenarioColor(result.scenario.color))} strokeWidth={1.4} strokeDasharray={`${3 + index} 6`} strokeOpacity={0.35} dot={false} activeDot={false} legendType="none" />)}
+      <Legend content={() => <ul className="timeline-legend" aria-label="Show or hide chart lines">
+        {[...visible.map((result) => ({ key: result.scenario.id, name: result.scenario.name, color: scenarioColor(result.scenario.color), coast: false })), ...(coastPoints ? [{ key: coastKey, name: `Coast path · ${focused.scenario.name}`, color: chartColors[2], coast: true }] : [])].map((series) => <li key={series.key}><button type="button" className="timeline-legend-button series-label" aria-pressed={!hiddenSeries.has(series.key)} aria-label={`${hiddenSeries.has(series.key) ? 'Show' : 'Hide'} ${series.name}`} title={`${hiddenSeries.has(series.key) ? 'Show' : 'Hide'} line`} data-series-active={!hiddenSeries.has(series.key) && highlightedScenario === series.key || undefined} style={{ color: series.color, ...neonStyle(series.color) }} onClick={() => toggleSeries(series.key)}><i className={series.coast ? 'legend-coast-line' : ''} aria-hidden="true" /><span>{series.name}</span></button></li>)}
+      </ul>} />
+      {visible.map((result, index) => <Line key={`target-${result.scenario.id}`} hide={hiddenSeries.has(result.scenario.id)} dataKey={`${result.scenario.id}__target`} data-chart-key={result.scenario.id} stroke={scenarioColor(result.scenario.color)} style={neonStyle(scenarioColor(result.scenario.color))} strokeWidth={1.4} strokeDasharray={`${3 + index} 6`} strokeOpacity={0.35} dot={false} activeDot={false} legendType="none" />)}
       {visible.map((result) => {
         const retirementPoint = result.points.find((point) => point.projectionPhase === 'retirement');
-        if (!retirementPoint) return null;
+        if (!retirementPoint || hiddenSeries.has(result.scenario.id)) return null;
         const retirementDate = new Date(retirementPoint.date);
         const x = axis === 'age' ? retirementPoint.age : retirementDate.getFullYear() + retirementDate.getMonth() / 12;
         return <ReferenceLine key={`retirement-${result.scenario.id}`} x={x} stroke={scenarioColor(result.scenario.color)} style={neonStyle(scenarioColor(result.scenario.color))} strokeDasharray="7 5" strokeOpacity={0.6} />;
       })}
-      {visible.map((result) => <Line key={result.scenario.id} dataKey={result.scenario.id} data-chart-key={result.scenario.id} type="monotone" stroke={scenarioColor(result.scenario.color)} style={neonStyle(scenarioColor(result.scenario.color))} strokeWidth={selected === result.scenario.id ? 3 : 2} dot={false} activeDot={false} isAnimationActive={false} opacity={selected && selected !== result.scenario.id ? .42 : 1} />)}
-      {visible.map((result) => result.firePoint && result.firePoint.month <= maxMonth ? <ReferenceDot key={`dot-${result.scenario.id}`} x={axis === 'age' ? result.firePoint.age : new Date(result.firePoint.date).getFullYear() + new Date(result.firePoint.date).getMonth() / 12} y={result.firePoint.firePortfolio} r={5} fill={scenarioColor(result.scenario.color)} style={neonStyle(scenarioColor(result.scenario.color))} stroke="var(--surface)" strokeWidth={2} /> : null)}
-    </ComposedChart></ResponsiveContainer><div className="timeline-floating-layer" ref={setTooltipPortal} /></ChartSurface>
-    <div className="chart-key"><span><i className="solid-line" /> Portfolio balance</span><span><i className="dash-line" /> FIRE target</span><span><i className="retirement-line" /> Retirement begins</span><span><i className="dot-key" /> First target crossing</span></div>
+      {visible.map((result) => <Line key={result.scenario.id} hide={hiddenSeries.has(result.scenario.id)} dataKey={result.scenario.id} data-chart-key={result.scenario.id} type="monotone" stroke={scenarioColor(result.scenario.color)} style={neonStyle(scenarioColor(result.scenario.color))} strokeWidth={selected === result.scenario.id ? 3 : 2} dot={false} activeDot={false} isAnimationActive={false} opacity={selected && selected !== result.scenario.id ? .42 : 1} />)}
+      {showRemaining && visible.map((result) => <Line key={`${result.scenario.id}__remaining`} hide={hiddenSeries.has(result.scenario.id)} dataKey={`${result.scenario.id}__remaining`} data-chart-key={result.scenario.id} type="monotone" stroke={scenarioColor(result.scenario.color)} style={neonStyle(scenarioColor(result.scenario.color))} strokeWidth={2} strokeDasharray="2 6" strokeOpacity={0.45} legendType="none" dot={false} activeDot={false} isAnimationActive={false} opacity={selected && selected !== result.scenario.id ? .42 : 1} />)}
+      {coastPoints && <Line key={coastKey} hide={!coastShown} dataKey={coastKey} data-chart-key={coastKey} type="monotone" stroke={chartColors[2]} style={neonStyle(chartColors[2])} strokeWidth={2.5} strokeDasharray="9 5" dot={false} activeDot={false} isAnimationActive={false} />}
+      {showRemaining && coastPoints && <Line key={`${coastKey}__remaining`} hide={!coastShown} dataKey={`${coastKey}__remaining`} data-chart-key={coastKey} type="monotone" stroke={chartColors[2]} style={neonStyle(chartColors[2])} strokeWidth={2} strokeDasharray="2 6" strokeOpacity={0.45} legendType="none" dot={false} activeDot={false} isAnimationActive={false} />}
+      {visible.map((result) => {
+        const gap = gaps.get(result.scenario.id);
+        if (!gap || gap.month > maxMonth || hiddenSeries.has(result.scenario.id)) return null;
+        return <ReferenceDot key={`gap-${result.scenario.id}`} x={axis === 'age' ? gap.age : new Date(gap.date).getFullYear() + new Date(gap.date).getMonth() / 12} y={gap.firePortfolio} r={5} fill="var(--surface)" stroke="var(--amber)" strokeWidth={2} label={result === focused ? ({ viewBox }) => {
+          const box = viewBox as { x: number; y: number; width: number; height: number };
+          const cx = box.x + box.width / 2;
+          const cy = box.y + box.height / 2;
+          const labelX = cx + 36;
+          const labelY = Math.max(28, cy - 18);
+          return <g className="spending-gap-annotation" pointerEvents="none" aria-label="Spending gap starts here">
+            <path d={`M ${labelX - 8} ${labelY + 6} L ${cx + 9} ${cy - 1}`} fill="none" stroke="var(--amber)" strokeWidth={1.3} markerEnd={`url(#${glowId}-gap-arrow)`} />
+            <text x={labelX} y={labelY} textAnchor="start" fill="var(--text-secondary)" fontSize={11}><tspan x={labelX}>Spending gap</tspan><tspan x={labelX} dy={14}>starts here</tspan></text>
+          </g>;
+        } : undefined} />;
+      })}
+      {visible.map((result) => {
+        const crossing = fundedTargetCrossing(result);
+        return crossing && crossing.month <= maxMonth && !hiddenSeries.has(result.scenario.id) ? <ReferenceDot key={`dot-${result.scenario.id}`} x={axis === 'age' ? crossing.age : new Date(crossing.date).getFullYear() + new Date(crossing.date).getMonth() / 12} y={crossing.firePortfolio} r={5} fill={scenarioColor(result.scenario.color)} style={neonStyle(scenarioColor(result.scenario.color))} stroke="var(--surface)" strokeWidth={2} /> : null;
+      })}
+    </ComposedChart></ResponsiveContainer>{visible.every((result) => hiddenSeries.has(result.scenario.id)) && !coastShown && <p className="timeline-empty-state">All lines hidden. Tap a name below to show a line.</p>}<div className="timeline-floating-layer" ref={setTooltipPortal} /></ChartSurface>
+    <div className="chart-key"><span><i className="solid-line" /> Spending covered</span>{showRemaining && hasVisibleGap && <span><i className="dotted-line" /> Some spending unpaid</span>}<span><i className="dash-line" /> FIRE target</span><span><i className="retirement-line" /> Retirement begins</span></div>
   </>;
 }
 
-export function SummaryTable({ results, selected, onSelect }: { results: ScenarioResult[]; selected: string; onSelect: (id: string) => void }) {
-  return <div className="table-wrap"><table><thead><tr><th>Scenario</th><th>FIRE goal</th><th>FIRE age / date</th><th>At target age</th><th>Monthly investing</th><th>Surplus / shortfall</th><th>Status</th></tr></thead><tbody>{results.map((result) => { const delta = result.targetPoint.firePortfolio - result.targetPoint.fireTarget; const status = monthStatus(result); return <tr key={result.scenario.id} className={selected === result.scenario.id ? 'selected' : ''} onClick={() => onSelect(result.scenario.id)}><td><i className="color-swatch" style={{ background: scenarioColor(result.scenario.color), ...neonStyle(scenarioColor(result.scenario.color)) }} /><strong>{result.scenario.name}</strong></td><td>{money(result.fireNumber, true)}</td><td><strong>{age(result.firePoint?.age)}</strong><small>{result.firePoint ? new Date(result.firePoint.date).toLocaleDateString(undefined, { month: 'short', year: 'numeric' }) : `By age ${result.profile.maxAge}`}</small></td><td>{money(result.targetPoint.firePortfolio, true)}</td><td>{money(result.plannedPersonalMonthly + result.plannedEmployerMonthly)}/mo<small>{money(result.plannedEmployerMonthly)} employer</small></td><td className={delta >= 0 ? 'positive-text' : 'negative-text'}>{delta >= 0 ? '+' : ''}{money(delta, true)}</td><td><span className={`status ${status.tone}`}>{status.text}</span></td></tr>; })}</tbody></table></div>;
+export function RetirementOutlook({ result, onViewHorizon }: { result: ScenarioResult; onViewHorizon: () => void }) {
+  const funding = result.retirementFunding;
+  const coast = result.coastFire;
+  const eligibility = coast?.eligibilityPoint;
+  return <div className="retirement-outlook">
+    <Section title="Can this plan cover retirement?" eyebrow="Your living expenses" className="funding-card">
+      <div className="outlook-body">
+        <strong className={`outlook-status ${retirementReady(result) ? 'positive-text' : 'negative-text'}`}>{retirementFundingStatus(result)}</strong>
+        <p className="outlook-summary muted">Retire at {funding.startAge.toFixed(1)} · Spend {money(funding.firstYearWithdrawal / 12)}/mo · Checked to age {funding.horizonAge}.</p>
+        <details className="result-details"><summary>View details</summary>
+          <p className="muted">Living expenses must be paid from available money every month. Includes the early retirement bridge and scheduled conversion taxes. Uses your entered returns and spending.</p>
+          <div className="mini-metrics outlook-metrics"><div><span>Investments at retirement</span><strong>{money(funding.balanceAtRetirement, true)}</strong></div><div><span>At age {funding.horizonAge}</span><strong>{money(funding.endingBalance, true)}</strong></div></div>
+          {funding.totalWithdrawalShortfall >= 0.01 && <p className="outlook-detail-warning">{money(funding.totalWithdrawalShortfall)} of spending goes unpaid across the projection. Remaining balances do not deduct unpaid spending; this total is not additional savings needed today.</p>}
+          {funding.unpaidConversionTax >= 0.01 && <p className="outlook-detail-warning">{money(funding.unpaidConversionTax)} of scheduled conversion taxes is unpaid.</p>}
+          {funding.points.some((point) => point.rothTransfers.some((transfer) => transfer.warning)) && <p className="outlook-detail-warning">Some scheduled Roth transfers need attention. Review them under Accounts.</p>}
+          <p className="muted">Market downturns, other taxes, and access strategies not modeled here can change the outcome.</p>
+          {result.profile.maxAge < funding.horizonAge && <button className="button secondary" onClick={onViewHorizon}>View through age {funding.horizonAge}</button>}
+        </details>
+      </div>
+    </Section>
+    <Section title="Coast FIRE" eyebrow="When investing becomes optional" className="coast-card">
+      <div className="outlook-body">
+        <strong className={`outlook-status ${eligibility ? 'positive-text' : 'negative-text'}`}>{coast?.reached ? 'Reached now' : eligibility ? `Projected eligibility at age ${eligibility.age.toFixed(1)}` : coast?.targetFundingGap ? 'Keep investing: retirement funding gap' : 'Not reached before retirement'}</strong>
+        <p className="outlook-summary muted">{eligibility ? `Work or other income still pays your bills until age ${result.profile.retirementAge.toFixed(1)}. After that, the Coast path covers projected spending through age ${coast!.funding!.horizonAge}.` : coastFireMessage(result)}</p>
+        <details className="result-details"><summary>View details</summary>{eligibility && <p>{coastFireMessage(result)}</p>}<div className="mini-metrics outlook-metrics"><div><span>Full retirement</span><strong>Age {result.profile.retirementAge.toFixed(1)}</strong></div><div><span>FIRE goal at retirement</span><strong>{coast ? money(coast.retirementTarget, true) : '—'}</strong></div></div><p className="muted">Eligibility requires reaching your FIRE goal by retirement and paying every month's living expenses and scheduled conversion taxes through age {result.retirementFunding.horizonAge}, including the early retirement bridge. {eligibility && 'Keep investing until the eligibility age, then stop new contributions, including employer contributions. '}Based on your account returns and inflation assumptions.</p>{eligibility && <p className="muted">Compare this alternative using Show Coast path in Scenario timelines.</p>}</details>
+      </div>
+    </Section>
+  </div>;
 }
 
-export function RetirementDrawdown({ result }: { result: ScenarioResult }) {
-  const summary = result.retirementSummary;
-  const endingPoint = result.points.at(-1)!;
-  const depleted = Boolean(summary.depletionPoint);
-  const withdrawalMode = result.profile.mode === 'nominal' ? 'rises with inflation' : 'stays level in today’s dollars';
-  const targetMethod = result.profile.customFireNumber == null
-    ? `${percent(result.profile.withdrawalRate)} withdrawal rate sizes the FIRE target; withdrawals use your spending amount.`
-    : 'Your custom FIRE target is used; withdrawals use your spending amount.';
-  return <Section
-    title="Retirement drawdown"
-    eyebrow="Withdrawal phase"
-    action={<span className={`status ${depleted ? 'negative' : 'positive'}`}>{depleted ? 'Projected depletion' : 'Lasts through projection'}</span>}
-  >
-    <div className={`drawdown-callout ${depleted ? 'negative' : 'positive'}`}>
-      <div>
-        <strong>{depleted ? `Projected depletion at age ${summary.depletionPoint!.age.toFixed(1)}` : `Projected to last through age ${endingPoint.age.toFixed(1)}`}</strong>
-        <p>Contributions stop at age {summary.startAge.toFixed(1)}. {targetMethod} Planned withdrawals {withdrawalMode}; this baseline uses deterministic returns and proportional withdrawals. Scheduled Roth conversion taxes are included; other taxes and penalty-free withdrawal order are not modeled.</p>
-      </div>
-    </div>
-    <div className="mini-metrics drawdown-metrics">
-      <div><span>Retirement starts</span><strong>Age {summary.startAge.toFixed(1)}</strong></div>
-      <div><span>First-year withdrawal</span><strong>{money(summary.firstYearWithdrawal)}/yr</strong></div>
-      <div><span>Balance at retirement</span><strong>{money(summary.balanceAtRetirement)}</strong></div>
-      <div><span>Balance at max age</span><strong>{money(summary.endingBalance)}</strong></div>
-      <div><span>Lowest projected balance</span><strong>{money(summary.lowestBalance)}</strong></div>
-    </div>
-    {endingPoint.cumulativeConversionTax > 0 && <p className="muted">Scheduled conversion taxes: {money(endingPoint.cumulativeConversionTax)} estimated · {money(endingPoint.cumulativeConversionTaxPaid)} funded from selected accounts.</p>}
-    {endingPoint.cumulativeConversionTax > endingPoint.cumulativeConversionTaxPaid && <p className="drawdown-warning">{money(endingPoint.cumulativeConversionTax - endingPoint.cumulativeConversionTaxPaid)} of conversion tax is unfunded. Balances do not deduct that unpaid amount.</p>}
-    {result.points.some((point) => point.rothTransfers.some((transfer) => transfer.warning)) && <p className="drawdown-warning">Some Roth transfers could not be fully applied. Review transfer details under Accounts.</p>}
-    {summary.totalWithdrawalShortfall > 0 && <p className="drawdown-warning">{money(summary.totalWithdrawalShortfall)} of planned withdrawals could not be funded after the FIRE portfolio reached $0.</p>}
-  </Section>;
+export function SummaryTable({ results, selected, onSelect }: { results: ScenarioResult[]; selected: string; onSelect: (id: string) => void }) {
+  return <div className="table-wrap"><table><thead><tr><th>Scenario</th><th>FIRE goal</th><th>Target age / date</th><th>At retirement age</th><th>Monthly investing</th><th>Surplus / shortfall</th><th>Spending coverage</th></tr></thead><tbody>{results.map((result) => { const delta = result.targetPoint.firePortfolio - result.targetPoint.fireTarget; const status = monthStatus(result); const crossing = fundedTargetCrossing(result); const gap = spendingGapPoint(result.retirementFunding); return <tr key={result.scenario.id} className={selected === result.scenario.id ? 'selected' : ''} onClick={() => onSelect(result.scenario.id)}><td><i className="color-swatch" style={{ background: scenarioColor(result.scenario.color), ...neonStyle(scenarioColor(result.scenario.color)) }} /><strong>{result.scenario.name}</strong></td><td>{money(result.fireNumber, true)}</td><td><strong>{crossing ? age(crossing.age) : gap ? 'Spending gap' : 'Not reached'}</strong><small>{crossing ? new Date(crossing.date).toLocaleDateString(undefined, { month: 'short', year: 'numeric' }) : gap ? `Age ${gap.age.toFixed(1)}` : `By age ${result.profile.maxAge}`}</small></td><td>{money(result.targetPoint.firePortfolio, true)}</td><td>{money(result.plannedPersonalMonthly + result.plannedEmployerMonthly)}/mo<small>{money(result.plannedEmployerMonthly)} employer</small></td><td className={delta >= 0 ? 'positive-text' : 'negative-text'}>{delta >= 0 ? '+' : ''}{money(delta, true)}</td><td><span className={`status ${status.tone}`}>{status.text}</span></td></tr>; })}</tbody></table></div>;
 }
 
 export function Analytics({ result, data }: { result: ScenarioResult; data: AppData }) {
@@ -184,7 +264,8 @@ export function Analytics({ result, data }: { result: ScenarioResult; data: AppD
   const [highlightedComposition, setHighlightedComposition] = useState<string | null>(null);
   const [highlightedAccount, setHighlightedAccount] = useState<string | null>(null);
   const dockedTooltip = useDockedChartTooltip();
-  const focus = result.firePoint ?? result.targetPoint;
+  const crossing = fundedTargetCrossing(result);
+  const focus = crossing ?? result.targetPoint;
   const composition = [
     { name: 'Starting principal', value: focus.startingPrincipal, color: '#98adb8' },
     { name: 'Personal contributions', value: focus.personalContributions, color: '#d3a17e' },
@@ -194,7 +275,7 @@ export function Analytics({ result, data }: { result: ScenarioResult; data: AppD
   const accountData = result.points.filter((_, index) => index % 12 === 0 && index <= Math.min(result.points.length - 1, Math.ceil((65 - result.profile.currentAge) * 12))).map((p) => ({ age: p.age, ...p.balances }));
   const allocations = allocationByClass(data.accounts);
   return <div className="analytics-grid">
-    <Section title="What builds the portfolio" eyebrow={result.firePoint ? 'At FIRE date' : 'At target age'}>
+    <Section title="What builds the portfolio" eyebrow={crossing ? 'At target crossing' : 'At retirement age'}>
       <div className="composition"><ChartSurface className="donut" svgGlowId={`${glowId}-pie`} onHighlightChange={setHighlightedComposition}><ResponsiveContainer width="100%" height="100%"><PieChart>{chartGlowDefinition(`${glowId}-pie`)}<Pie data={composition} dataKey="value" innerRadius={48} outerRadius={76} paddingAngle={3} stroke="var(--surface)">{composition.map((item) => <Cell key={item.name} data-chart-key={item.name} fill={item.color} style={neonStyle(item.color)} />)}</Pie><Tooltip
         portal={compositionPortal}
         active={dockedTooltip ? true : undefined}
@@ -228,20 +309,35 @@ export function Analytics({ result, data }: { result: ScenarioResult; data: AppD
     </Section>
     <Section title="Account balances over time" eyebrow="Selected scenario · independent balances" className="wide-panel">
       <div className="account-chart-note"><span>Each line is one account—not a cumulative stack.</span><span>Contributions before retirement · withdrawals after</span></div>
+      {result.retirementFunding.firstUnfundedAge != null && <p className="chart-phase-note muted">These lines show remaining investments, including money you cannot yet use. Some living expenses go unpaid from age {result.retirementFunding.firstUnfundedAge.toFixed(1)}.</p>}
       <ChartSurface className="account-chart" svgGlowId={`${glowId}-accounts`} onHighlightChange={setHighlightedAccount}><ResponsiveContainer width="100%" height="100%"><LineChart data={accountData} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}>{chartGlowDefinition(`${glowId}-accounts`)}<CartesianGrid vertical={false} stroke="var(--line)" /><XAxis dataKey="age" tickFormatter={(v) => Number(v).toFixed(0)} stroke="var(--muted)" axisLine={false} tickLine={false} /><YAxis tickFormatter={(v) => money(v, true)} stroke="var(--muted)" width={58} axisLine={false} tickLine={false} /><Tooltip content={(props) => accountTooltip({ ...props, highlightedKey: highlightedAccount })} active={dockedTooltip ? highlightedAccount !== null : undefined} isAnimationActive={false} allowEscapeViewBox={{ x: false, y: false }} />{result.accounts.map((account, i) => <Line key={account.id} type="monotone" dataKey={account.id} data-chart-key={account.id} name={account.name} stroke={chartColors[i % chartColors.length]} style={neonStyle(chartColors[i % chartColors.length])} strokeWidth={2.2} dot={false} activeDot={false} isAnimationActive={false} />)}</LineChart></ResponsiveContainer></ChartSurface>
     </Section>
   </div>;
 }
 
 export function BridgeAndEmergency({ result, data }: { result: ScenarioResult; data: AppData }) {
-  const { startAge, years: bridgeYears, need: bridgeNeed, accessible, usesTargetAge } = bridgeMetrics(result);
+  const bridge = bridgeMetrics(result);
+  const { startAge, years: bridgeYears, need: bridgeNeed, accessible } = bridge;
+  const coverage = bridgeNeed === 0 ? 1 : Math.min(bridge.funded ? 1 : 0.999, bridge.fundedAmount / bridgeNeed);
   const currentBudget = scenarioBudgetMetrics(data, result.scenario);
   const cashAccount = result.accounts.find((a) => a.type === 'HYSA / Cash');
   const phase = currentBudget.phase;
   const cashSavings = cashAccount ? (phase?.contributions[cashAccount.id]?.personal ?? cashAccount.monthlyContribution) : 0;
   const emergency = emergencyFundMetrics(cashAccount?.balance ?? 0, result.profile.emergencyTarget, cashSavings, data.profile.normalMonthlySpending, data.profile.jobLossMonthlySpending);
   return <div className="bridge-grid">
-    <Section title="Early retirement bridge" eyebrow="Access before 59½"><p className="muted">{usesTargetAge ? `FIRE is not reached in this projection. This estimate uses your planned retirement age ${startAge.toFixed(1)}; it does not mean retirement is funded.` : `If you retire at projected FIRE age ${startAge.toFixed(1)}, the bridge runs from that age to 59½. The main chart still starts withdrawals at your chosen retirement age.`}</p><div className="bridge-callout"><ChartSurface className={`bridge-ring ${accessible >= bridgeNeed ? 'good' : 'warn'}`} style={neonStyle(accessible >= bridgeNeed ? chartColors[1] : chartColors[6])}><strong>{percent(bridgeNeed === 0 ? 1 : Math.min(1, accessible / bridgeNeed), 0)}</strong><small>funded</small></ChartSurface><div><h3>{bridgeYears === 0 ? 'No bridge needed before 59½' : accessible >= bridgeNeed ? 'Your estimated bridge is covered' : `${money(bridgeNeed - accessible)} bridge gap`}</h3><p>{money(accessible)} accessible against an estimated {money(bridgeNeed)} needed for {bridgeYears.toFixed(1)} years.</p></div></div><div className="mini-metrics"><div><span>{usesTargetAge ? 'Accessible at target age' : 'Accessible at FIRE'}</span><strong>{money(accessible)}</strong></div><div><span>Annual spending</span><strong>{money(result.profile.annualSpending)}</strong></div><div><span>Bridge years</span><strong>{bridgeYears.toFixed(1)}</strong></div></div><p className="fine-print">How it’s calculated: immediate-access account balances, plus available Roth IRA basis, capped at included Roth IRA balances. Regular contributions come first, followed by conversion principal in tax-year order (taxable before nontaxable). Taxable conversions become available after five tax years or at age 59½. Only accounts included in net worth count here. 401(k) balances remain restricted. Accessibility settings control other accounts; Roth IRA access always uses tracked basis. Spending is summed through 59½, with inflation in future-dollar mode; scheduled conversions and funded conversion taxes affect balances. This is an access snapshot at the start of the bridge, not a simulation of annual ladder withdrawals; later conversion unlocks and bridge investment returns are not included in the coverage percentage.</p></Section>
+    <Section title="Living expenses before age 59½" eyebrow="Early retirement bridge" className="bridge-panel">
+      <p className="muted">{bridgeYears > 0 ? `From retirement at age ${startAge.toFixed(1)} until age 59½, living expenses need money you can already use.` : 'Your retirement starts at or after 59½, so no early retirement bridge is needed.'}</p>
+      <div className="bridge-callout">
+        <ChartSurface className={`bridge-ring ${bridge.funded ? 'good' : 'warn'}`} style={neonStyle(bridge.funded ? chartColors[1] : chartColors[6])}><strong>{percent(coverage, 1)}</strong><small>covered</small></ChartSurface>
+        <div><h3>{bridgeYears === 0 ? 'No bridge needed' : bridge.funded ? 'Living expenses are covered' : `Money falls short at age ${(bridge.firstGapAge ?? startAge).toFixed(1)}`}</h3><p>{bridgeYears === 0 ? 'Retirement spending is checked separately through the full projection.' : bridge.funded ? 'Accessible money covers your planned spending until retirement accounts become available.' : 'Some money is unavailable or insufficient when needed. Later investment growth does not cover the earlier gap.'}</p></div>
+      </div>
+      <details className="result-details panel-details"><summary>View details</summary>
+      <div className="mini-metrics"><div><span>Accessible at retirement</span><strong>{money(accessible)}</strong></div><div><span>First-year spending</span><strong>{money(result.retirementFunding.firstYearWithdrawal)}</strong></div><div><span>Bridge years</span><strong>{bridgeYears.toFixed(1)}</strong></div></div>
+      <p className="muted">{percent(coverage, 1)} of projected spending and scheduled conversion taxes is covered: {money(bridge.fundedAmount)} of {money(bridgeNeed)}.{!bridge.funded && ` ${money(bridge.shortfall)} goes unpaid. This total is not the additional savings needed today.`}</p>
+      {bridge.conversionTax > 0 && <p className="muted">Bridge funding includes {money(bridge.conversionTax)} of scheduled conversion taxes.</p>}
+      <p className="fine-print">Only accounts marked to fund FIRE are used for spending. The model uses liquid funds first, then Roth IRA regular contributions and accessible conversion principal in tax-year order. Taxable conversions follow their five-tax-year clocks; later unlocks, investment growth, inflation, and scheduled conversion taxes are included. IRA and 401(k) access cannot be made unrestricted by changing their accessibility label. Ordinary retirement accounts unlock at 59½; HSA general spending is modeled from 65. Rule of 55, SEPP/72(t), medical-receipt exceptions, ordinary withdrawal taxes, and Roth earnings qualification are not modeled. A shortfall in any month prevents an overall funded result, even if balances recover later.</p>
+      </details>
+    </Section>
     <Section title="Emergency fund" eyebrow="Cash runway"><p className="muted">Cash target: {money(result.profile.emergencyTarget)} · Normal spending: {money(data.profile.normalMonthlySpending)}/mo · Job-loss spending: {money(data.profile.jobLossMonthlySpending)}/mo</p><div className="mini-metrics"><div><span>Normal runway</span><strong>{emergency.normalRunway.toFixed(1)} mo</strong></div><div><span>Job-loss runway</span><strong>{emergency.jobLossRunway.toFixed(1)} mo</strong></div><div><span>Target ETA</span><strong>{Number.isFinite(emergency.monthsToTarget) ? `${emergency.monthsToTarget} mo` : 'No savings'}</strong></div></div><ChartSurface className="progress" style={neonStyle(chartColors[1])}><span style={{ width: `${Math.min(100, (cashAccount?.balance ?? 0) / Math.max(1, result.profile.emergencyTarget) * 100)}%` }} /></ChartSurface><small className="muted">{money(emergency.remaining)} remaining · {money(cashSavings)}/mo current cash savings</small></Section>
   </div>;
 }

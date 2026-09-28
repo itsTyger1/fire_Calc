@@ -27,7 +27,7 @@ ipcMain.handle('delete-plan-file', async (_event, id) => {
 });
 ipcMain.handle('get-app-version', () => packageVersion);
 app.whenReady().then(async () => {
-  const window = new BrowserWindow({ show: false, width: 1450, height: 1050, webPreferences: { partition: 'ui-smoke', contextIsolation: true, nodeIntegration: false, preload: path.join(__dirname, '../electron/preload.cjs') } });
+  const window = new BrowserWindow({ show: false, width: 1450, height: 1050, webPreferences: { partition: 'ui-smoke', backgroundThrottling: false, contextIsolation: true, nodeIntegration: false, preload: path.join(__dirname, '../electron/preload.cjs') } });
   const evaluate = async (fn, ...args) => {
     const result = await window.webContents.executeJavaScript(`(() => { try { return { value: (${fn.toString()})(...${JSON.stringify(args)}) }; } catch (error) { return { error: error.stack || error.message }; } })()`)
       .catch((error) => { throw new Error(`${error.message}\nDuring: ${fn.toString()}`); });
@@ -128,6 +128,60 @@ app.whenReady().then(async () => {
     await evaluate((fixture) => localStorage.setItem('fire-projector-v1', JSON.stringify(fixture)), populatedFixture);
     await window.webContents.reload(); await wait();
     assert.equal(await evaluate(() => document.getElementById('tab-plan').getAttribute('aria-selected')), 'true');
+    const bridgeFixture = structuredClone(populatedFixture);
+    bridgeFixture.profile = { ...bridgeFixture.profile, currentAge: 49, retirementAge: 50, maxAge: 100,
+      annualSpending: 12000, customFireNumber: 300000, mode: 'real', rothContributionBasis: 0, rothTransfers: [], rothConversionHistory: [] };
+    bridgeFixture.accounts = [{ ...bridgeFixture.accounts[0], id: 'locked', name: 'Locked retirement', type: 'Traditional 401(k)', balance: 1000000,
+      monthlyContribution: 0, employerContribution: 0, annualReturn: 0, returnMode: 'custom', accessibility: 'Restricted', fireEligible: true, holdings: [] }];
+    bridgeFixture.phases = [{ id: 'bridge-saving', name: 'Saving', startsWhen: { kind: 'always' }, contributions: { locked: { personal: 0, employer: 0 } } }];
+    bridgeFixture.scenarios = [{ ...bridgeFixture.scenarios[0], overrides: {} }];
+    await evaluate((fixture) => localStorage.setItem('fire-projector-v1', JSON.stringify(fixture)), bridgeFixture);
+    await window.webContents.reload(); await wait();
+    assert.match(await evaluate(() => document.querySelector('.hero h1').textContent), /needs more accessible money/);
+    assert.match(await evaluate(() => document.querySelector('.hero p').textContent), /money available for living expenses falls short at age 50.0/);
+    assert.match(await evaluate(() => document.querySelector('.funding-card').textContent), /Spending gap at age 50.0/);
+    assert.match(await evaluate(() => document.querySelector('.bridge-panel').textContent), /retirement at age 50.0/);
+    assert.equal(await evaluate(() => document.querySelector('.bridge-ring strong').textContent), '0.0%');
+    assert.ok(await evaluate(() => document.querySelector('.table-wrap .status').textContent.includes('Spending gap at age 50.0')));
+    window.setSize(390, 844); await wait();
+    await evaluate(() => { window.scrollTo({ top: window.scrollY + document.querySelector('.bridge-panel').getBoundingClientRect().top - 85, behavior: 'instant' }); }); await wait();
+    assert.ok(await evaluate(() => document.querySelector('.bridge-panel').getBoundingClientRect().top >= 60 && document.querySelector('.bridge-panel').getBoundingClientRect().top < 100));
+    await capture('bridge-gap-mobile');
+    assert.equal(await evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
+    window.setSize(1450, 1050); await wait();
+    bridgeFixture.accounts.push({ ...bridgeFixture.accounts[0], id: 'liquid', name: 'Bridge funds', type: 'Taxable Brokerage', accessibility: 'Immediate', balance: 114000 });
+    await evaluate((fixture) => localStorage.setItem('fire-projector-v1', JSON.stringify(fixture)), bridgeFixture);
+    await window.webContents.reload(); await wait();
+    assert.match(await evaluate(() => document.querySelector('.hero h1').textContent), /projected to cover retirement/);
+    assert.equal(await evaluate(() => document.querySelector('.bridge-ring strong').textContent), '100.0%');
+    assert.match(await evaluate(() => document.querySelector('.bridge-panel h3').textContent), /Living expenses are covered/);
+    if (process.argv.includes('--bridge-only')) {
+      assert.equal(errors.length, 0, errors.join('\n'));
+      console.log('PASS: bridge warning/funded states, selected retirement date, desktop/mobile layout.');
+      return;
+    }
+    await evaluate((fixture) => localStorage.setItem('fire-projector-v1', JSON.stringify(fixture)), populatedFixture);
+    await window.webContents.reload(); await wait();
+    assert.equal(await evaluate(() => document.querySelectorAll('.retirement-outlook .panel').length), 2);
+    assert.match(await evaluate(() => document.querySelector('.funding-card').textContent), /covered through age 100/);
+    assert.match(await evaluate(() => document.querySelector('.coast-card').textContent), /stop adding to retirement savings at age/);
+    await edit('Maximum projection age · shared', 70);
+    await evaluate(() => [...document.querySelectorAll('.funding-card button')].find((button) => button.textContent === 'View through age 100').click()); await wait();
+    assert.equal(await evaluate(() => document.querySelector('[aria-label="Timeline range"]').value), 'horizon');
+    const savedBeforeCoast = await evaluate(() => localStorage.getItem('fire-projector-v1'));
+    await evaluate(() => document.querySelector('.coast-path-toggle').click()); await wait();
+    assert.equal(await evaluate(() => document.querySelector('.coast-path-toggle').getAttribute('aria-pressed')), 'true');
+    assert.match(await evaluate(() => document.querySelector('.coast-path-note').textContent), /stop investing at age.*cover living expenses with income/);
+    assert.ok(await evaluate(() => [...document.querySelectorAll('#scenario-timelines .recharts-line')].some((line) => line.querySelector('[data-chart-key$="__coast"]') || line.getAttribute('data-chart-key')?.endsWith('__coast'))));
+    assert.equal(await evaluate(() => localStorage.getItem('fire-projector-v1')), savedBeforeCoast, 'Coast comparison must not edit the saved plan');
+    window.setSize(390, 844); await wait();
+    await evaluate(() => { document.querySelector('.retirement-outlook').scrollIntoView({ behavior: 'instant', block: 'start' }); }); await wait(); await capture('retirement-outlook-mobile');
+    assert.equal(await evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
+    assert.ok(await evaluate(() => document.querySelector('.coast-card').getBoundingClientRect().top >= document.querySelector('.funding-card').getBoundingClientRect().bottom));
+    window.setSize(1450, 1050); await wait();
+    await evaluate(() => document.querySelector('.coast-path-toggle').click()); await wait();
+    assert.equal(await evaluate(() => Boolean(document.querySelector('.coast-path-note'))), false);
+    await edit('Maximum projection age · shared', 100);
     await tab('money');
     assert.equal(await inputValue('Taxable Brokerage monthly contribution'), '850');
     assert.match(await remainder(), /522/);
@@ -260,7 +314,7 @@ app.whenReady().then(async () => {
     window.setSize(1050, 900); await wait(); await capture('monthly-money-small');
     assert.equal(await evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
     assert.equal(errors.length, 0, errors.join('\n'));
-    console.log('PASS: Plan on opening/reset/refresh, zero defaults, click-away and touch-pointer saving, Escape cancellation, Enter edits, budgeting, scenario isolation, persistence, and desktop layout.');
+    console.log('PASS: retirement access and bridge status on desktop/mobile, Coast comparison, Plan on opening/reset/refresh, zero defaults, click-away and touch saving, budgeting, scenario isolation, and persistence.');
   } catch (error) { console.error(error); code = 1; }
   finally {
     window.destroy();

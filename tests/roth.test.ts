@@ -231,7 +231,7 @@ describe('mega-backdoor Roth planning', () => {
   });
 
   it('reduces after-tax basis proportionally when retirement draws from that account', () => {
-    const points = projectCore({ profile: { ...profile, retirementAge: 40, annualSpending: 1200, rothTransfers: [], maxAge: 41 }, accounts: [afterTax], phases: [], includeRetirement: true });
+    const points = projectCore({ profile: { ...profile, currentAge: 60, retirementAge: 60, annualSpending: 1200, rothTransfers: [], maxAge: 61 }, accounts: [afterTax], phases: [], includeRetirement: true });
     expect(points[12].balances.source).toBe(10800);
     expect(points[12].afterTaxBases.source).toBeCloseTo(9000);
   });

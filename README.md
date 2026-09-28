@@ -30,11 +30,27 @@ The app opens on **Plan**, including after a refresh or reset, in both the deskt
 
 Numeric edits apply and save automatically when you click or tap outside the field, move to another field, or press **Enter**. Press **Escape** to cancel an unfinished numeric edit. This behavior is shared by the desktop app and the mobile web app. Existing numeric limits still apply. All charts, metrics, and budget comparisons appear below the inputs. Use **View results** to jump to the results.
 
+Click or tap a numeric value to place the cursor without selecting it all. Double-click selects the whole value. Mobile text selection uses the browser's native long-press and selection handles.
+
 The take-home formula uses the configured deposited income and all personal non-payroll contributions:
 
 `Deposited take-home − expenses − personal non-payroll contributions = unassigned take-home`
 
 401(k) payroll and employer contributions are not deducted again because they are already withheld or paid separately. Gross income remains supported in imported data but has no input because it does not affect the calculation.
+
+## Retirement funding and Coast FIRE
+
+**Retirement funding** checks your actual contribution plan and spending withdrawals through at least age 100, or an older maximum projection age if selected. Contributions stop and withdrawals begin at your chosen retirement age. The result can be funded even below the FIRE target; the app also identifies a later target crossing while withdrawing and the first age when spending cannot be funded. Scheduled conversion-tax shortfalls prevent a fully funded result. Use **View through age 100** or the timeline range selector when the visible projection ends earlier.
+
+**Early retirement bridge** uses that same retirement date and checks every monthly withdrawal through 59½. It includes investment growth, inflation, scheduled conversions, their tax funding, and later conversion unlocks. Before 59½, liquid FIRE accounts are spent first, then available Roth IRA regular contribution basis and conversion principal in tax-year order. The coverage percentage measures funded spending and conversion taxes across the bridge, rather than dividing starting accessible assets by total spending. Any monthly gap prevents an overall funded result, even if investments subsequently grow or unlock.
+
+The main timeline ends each scenario's investment line at its first spending gap. The selected scenario marks that point and mutes the later chart area. **Show remaining investments** optionally displays a dotted continuation, clearly labelled as balances while some spending goes unpaid. Target crossings after a gap are not presented as milestones. **Living expenses before age 59½** gives a covered-or-gap answer; the calculations, unpaid totals, and access assumptions are under **View details**. An accumulated unpaid total is not an estimate of additional savings needed today.
+
+Only accounts marked to fund FIRE pay spending; excluded emergency cash is not used automatically. Standard IRA and 401(k) balances unlock at 59½, regardless of the accessibility label. HSA general spending is modeled from 65; other accounts require Immediate accessibility. Special strategies such as Rule of 55, SEPP/72(t), medical-receipt exceptions, ordinary withdrawal taxes, and Roth earnings qualification are not modeled. These access assumptions follow [IRS IRA distribution guidance](https://www.irs.gov/publications/p590b) and [IRS HSA guidance](https://www.irs.gov/publications/p969). The projection reports unpaid spending separately: remaining locked balances may still grow, but a later target crossing does not fix the earlier gap.
+
+**Coast FIRE** finds the earliest month when you could stop all investment contributions, including employer contributions, still reach your FIRE target by the chosen retirement age, and cover every month's retirement spending and scheduled conversion taxes through at least age 100 (or an older maximum projection age). This includes the early retirement bridge and account access rules. Future eligibility assumes the current contribution plan continues until that month. Income must cover living expenses until full retirement; Coast eligibility does not mean withdrawals can start immediately. Growth respects account eligibility, custom account returns, inflation, scenario overrides, and scheduled Roth transfers and their tax funding. Reaching the target without covering retirement spending is shown as a funding gap, rather than Coast eligibility.
+
+**Show Coast path** displays the same funded projection used to establish Coast eligibility: contributions stop at the projected Coast age, then spending withdrawals begin at the original retirement age under the same access rules. It is available only when both the target and retirement funding checks pass. This comparison does not change inputs or named saves. Both results use the entered return assumptions; they are projections rather than probabilities of success, and do not model market volatility or every tax and early-access restriction.
 
 ## Desktop updates
 
