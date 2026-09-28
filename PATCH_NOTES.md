@@ -2,6 +2,12 @@
 
 This history is compiled from the project’s Git commits and published GitHub Releases, from the first repository commit on September 4, 2026. It records development milestones as well as versioned releases. Published versions include v1.2.1, v1.2.2, v1.2.4, v1.2.5, v1.2.6, v1.2.71, and v1.2.72; no v1.2.3 release or tag was found in the available history.
 
+## v1.4.1 — September 28, 2026
+
+- Numeric edits now apply and save when a user clicks or taps outside a field, moves to another field, or presses Enter. Escape still cancels an unfinished edit, and untouched zero defaults remain unchanged.
+- The desktop and web apps now open on Plan, including after refresh and Reset.
+- Added regression checks for click-away saving, mobile touch-pointer saving, Escape cancellation, and the opening tab.
+
 ## v1.4.0 — September 28, 2026
 
 - Added a minimal black interface shared by the web and Windows apps, with pastel chart colors that brighten on hover, touch, and when a section is prominent on screen.
