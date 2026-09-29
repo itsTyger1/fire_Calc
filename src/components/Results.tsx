@@ -10,6 +10,7 @@ import { ColorCard } from './ColorCard';
 import { DraggableChartTooltip } from './DraggableChartTooltip';
 import { chartGlowDefinition } from './ChartGlow';
 import { coastFireMessage, fundedTargetCrossing, retirementFundingStatus, retirementReady, spendingGapPoint } from '../domain/outlook';
+import { retirementPortfolioComposition } from '../domain/portfolioComposition';
 const allocationColors = chartColors;
 
 export const monthStatus = (result: ScenarioResult) => {
@@ -264,18 +265,13 @@ export function Analytics({ result, data }: { result: ScenarioResult; data: AppD
   const [highlightedComposition, setHighlightedComposition] = useState<string | null>(null);
   const [highlightedAccount, setHighlightedAccount] = useState<string | null>(null);
   const dockedTooltip = useDockedChartTooltip();
-  const crossing = fundedTargetCrossing(result);
-  const focus = crossing ?? result.targetPoint;
-  const composition = [
-    { name: 'Starting principal', value: focus.startingPrincipal, color: '#98adb8' },
-    { name: 'Personal contributions', value: focus.personalContributions, color: '#d3a17e' },
-    { name: 'Employer contributions', value: focus.employerContributions, color: '#a6b69f' },
-    { name: 'Investment growth', value: Math.max(0, focus.investmentGrowth), color: '#b5a1bb' },
-  ];
+  const portfolio = retirementPortfolioComposition(result);
+  const compositionColors = ['#98adb8', '#d3a17e', '#a6b69f', '#b5a1bb', '#40c7d9'];
+  const composition = portfolio.slices.map((slice, index) => ({ ...slice, color: compositionColors[index] }));
   const accountData = result.points.filter((_, index) => index % 12 === 0 && index <= Math.min(result.points.length - 1, Math.ceil((65 - result.profile.currentAge) * 12))).map((p) => ({ age: p.age, ...p.balances }));
   const allocations = allocationByClass(data.accounts);
   return <div className="analytics-grid">
-    <Section title="What builds the portfolio" eyebrow={crossing ? 'At target crossing' : 'At retirement age'}>
+    <Section title="What builds the portfolio" eyebrow="At retirement age">
       <div className="composition"><ChartSurface className="donut" svgGlowId={`${glowId}-pie`} onHighlightChange={setHighlightedComposition}><ResponsiveContainer width="100%" height="100%"><PieChart>{chartGlowDefinition(`${glowId}-pie`)}<Pie data={composition} dataKey="value" innerRadius={48} outerRadius={76} paddingAngle={3} stroke="var(--surface)">{composition.map((item) => <Cell key={item.name} data-chart-key={item.name} fill={item.color} style={neonStyle(item.color)} />)}</Pie><Tooltip
         portal={compositionPortal}
         active={dockedTooltip ? true : undefined}
@@ -287,7 +283,8 @@ export function Analytics({ result, data }: { result: ScenarioResult; data: AppD
           const color = item?.color ?? String(payload[0].color);
           return <div className="composition-tooltip"><i className="series-dot" data-series-active={highlightedComposition === item?.name || undefined} style={{ background: color, ...neonStyle(color) }} /><span>{payload[0].name}</span><strong>{money(Number(payload[0].value))}</strong></div>;
         }}
-      /></PieChart></ResponsiveContainer><div><strong>{money(focus.firePortfolio, true)}</strong><small>Total</small></div></ChartSurface><div className="legend-list">{composition.map((item) => <div key={item.name}><i className="color-swatch series-dot" data-series-active={highlightedComposition === item.name || undefined} style={{ background: item.color, ...neonStyle(item.color) }} /><span>{item.name}</span><b>{money(item.value, true)}</b><small>{percent(item.value / Math.max(1, focus.firePortfolio))}</small></div>)}</div></div>
+      /></PieChart></ResponsiveContainer><div><strong>{money(portfolio.total, true)}</strong><small>Total</small></div></ChartSurface><div className="legend-list">{composition.map((item) => <div key={item.name}><i className="color-swatch series-dot" data-series-active={highlightedComposition === item.name || undefined} style={{ background: item.color, ...neonStyle(item.color) }} /><span>{item.name}</span><b>{money(item.value, true)}</b><small>{item.percentage.toFixed(1)}%</small></div>)}</div></div>
+      {portfolio.hasDeductions && <p className="chart-phase-note muted">Slices show money remaining at retirement. Losses, conversion taxes, or transfers out reduce these amounts proportionally.</p>}
       <div className="composition-readout" ref={setCompositionPortal}><p>Hover or tap a segment to see its value here.</p></div>
     </Section>
     <Section title="All-account allocation" eyebrow="Current holdings" className="allocation-panel">
